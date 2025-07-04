@@ -1,0 +1,15 @@
+# Microsoft Graph API Configuration
+azure:
+  activedirectory:
+    # Your Azure AD Application (client) ID
+    client-id: 8a926bc2-ddfa-4863-bde0-adfasdfa
+
+    # Your Azure AD Tenant (directory) ID
+    tenant-id: 223b72d5-9677-4a5e-a608-asdfasdf
+
+    # Your Azure AD Client Secret Value (copied immediately after creation)
+    client-secret: tL08Q~asfasdfas-a-dfasd--adfad
+
+# Application-specific configuration
+graph:
+  sender-email: exampletest@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
