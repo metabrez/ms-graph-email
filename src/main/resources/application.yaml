@@ -2,13 +2,13 @@
 azure:
   activedirectory:
     # Your Azure AD Application (client) ID
-    client-id: 8a926bc2-ddfa-4863-bde0-adfasdfa
+    client-id: Ebnter your client azure id
 
     # Your Azure AD Tenant (directory) ID
-    tenant-id: 223b72d5-9677-4a5e-a608-asdfasdf
+    tenant-id: Azure tenant id
 
     # Your Azure AD Client Secret Value (copied immediately after creation)
-    client-secret: tL08Q~asfasdfas-a-dfasd--adfad
+    client-secret: azure client secret
 
 # Application-specific configuration
 graph:
