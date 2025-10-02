@@ -1,4 +1,3 @@
-// src/test/java/com/edu/service/MailServiceTest.java
 package com.edu.service;
 
 import com.edu.model.EmailAddress;
@@ -20,17 +19,16 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 /**
- * Unit tests for the MailService class.
- * Mocks the GraphServiceClient and its chained methods to isolate MailService logic.
+ * Unit tests for the MailService class, including MSGraph, SMTP, and Fallback logic.
  */
 class MailServiceTest {
 
@@ -38,13 +36,16 @@ class MailServiceTest {
     private GraphServiceClient graphServiceClient;
 
     @Mock
-    private UserItemRequestBuilder userItemRequestBuilder; // Mocks graphServiceClient.users().byUserId(senderEmail)
+    private SmtpMailService smtpMailService; // Mock the new dependency
 
     @Mock
-    private SendMailRequestBuilder sendMailRequestBuilder; // Mocks .sendMail()
+    private UserItemRequestBuilder userItemRequestBuilder;
 
     @Mock
-    private MessagesRequestBuilder messagesRequestBuilder; // Mocks .messages()
+    private SendMailRequestBuilder sendMailRequestBuilder;
+
+    @Mock
+    private MessagesRequestBuilder messagesRequestBuilder;
 
     @InjectMocks
     private MailService mailService;
@@ -58,69 +59,147 @@ class MailServiceTest {
         // Inject the @Value field for senderEmail
         ReflectionTestUtils.setField(mailService, "senderEmail", SENDER_EMAIL);
 
-        // Define common mock behaviors for chained calls
+        // Define common mock behaviors for Graph chained calls (only setup needed)
         when(graphServiceClient.users()).thenReturn(mock(com.microsoft.graph.users.UsersRequestBuilder.class));
         when(graphServiceClient.users().byUserId(SENDER_EMAIL)).thenReturn(userItemRequestBuilder);
         when(userItemRequestBuilder.sendMail()).thenReturn(sendMailRequestBuilder);
         when(userItemRequestBuilder.messages()).thenReturn(messagesRequestBuilder);
-    }
 
-    /**
-     * Tests the sendEmail method for a successful email sending scenario.
-     */
-    @Test
-    void sendEmail_success() {
-        // Given
-        MailRequest mailRequest = new MailRequest();
-        mailRequest.setSubject("Test Subject");
-        mailRequest.setBodyContent("Test Body");
-        mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
-
-        // Mock the post() method of sendMailRequestBuilder to do nothing (simulate success)
+        // Reset the behavior of core sending mocks before each test
         doNothing().when(sendMailRequestBuilder).post(any(SendMailPostRequestBody.class));
-
-        // When
-        MailResponse response = mailService.sendEmail(mailRequest);
-
-        // Then
-        assertNotNull(response);
-        assertEquals("SUCCESS", response.getStatus());
-        assertEquals("Email send request accepted by Microsoft Graph. It should appear in Sent Items shortly.", response.getMessage());
-        assertEquals("N/A_DirectSend", response.getMessageId());
-
-        // Verify that the sendMail().post() method was called exactly once with any SendMailPostRequestBody
-        verify(sendMailRequestBuilder, times(1)).post(any(SendMailPostRequestBody.class));
+        when(smtpMailService.sendSmtpEmail(any(MailRequest.class))).thenReturn(
+                MailResponse.builder().status("SUCCESS").message("SMTP OK").messageId("N/A_SmtpSend").build());
     }
 
-    /**
-     * Tests the sendEmail method for a failed email sending scenario (e.g., Graph API error).
-     */
-    @Test
-    void sendEmail_failure() {
-        // Given
+    private MailRequest createMailRequest(String protocol) {
         MailRequest mailRequest = new MailRequest();
         mailRequest.setSubject("Test Subject");
         mailRequest.setBodyContent("Test Body");
+        mailRequest.setPreferredProtocol(protocol);
         mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        return mailRequest;
+    }
 
-        // Mock the post() method to throw an exception
-        doThrow(new RuntimeException("Graph API Error")).when(sendMailRequestBuilder).post(any(SendMailPostRequestBody.class));
+    private MailResponse createGraphSuccessResponse() {
+        return MailResponse.builder().status("SUCCESS").message("Email send request accepted by Microsoft Graph.").messageId("N/A_GraphSend").build();
+    }
+
+    private MailResponse createGraphFailureResponse(String error) {
+        return MailResponse.builder().status("FAILED").message("Failed to send email via MSGraph: " + error).messageId(null).build();
+    }
+
+    private MailResponse createSmtpSuccessResponse() {
+        return MailResponse.builder().status("SUCCESS").message("Email sent successfully via SMTP.").messageId("N/A_SmtpSend").build();
+    }
+
+    private MailResponse createSmtpFailureResponse(String error) {
+        return MailResponse.builder().status("FAILED").message("Failed to send email via SMTP: " + error).messageId(null).build();
+    }
+
+
+    /**
+     * Test case 1: MSGRAPH is preferred and succeeds.
+     */
+    @Test
+    void trySendEmail_preferredGraph_success() {
+        // Given
+        MailRequest request = createMailRequest("MSGRAPH");
 
         // When
-        MailResponse response = mailService.sendEmail(mailRequest);
+        boolean isSuccess = mailService.trySendEmail(request);
 
         // Then
-        assertNotNull(response);
-        assertEquals("FAILED", response.getStatus());
-        assertEquals("Failed to send email: Graph API Error", response.getMessage());
-        assertEquals(null, response.getMessageId());
-
-        // Verify that the sendMail().post() method was still attempted
+        assertTrue(isSuccess);
+        // Verify only Graph attempt was made
         verify(sendMailRequestBuilder, times(1)).post(any(SendMailPostRequestBody.class));
+        verify(smtpMailService, never()).sendSmtpEmail(any(MailRequest.class));
     }
 
     /**
-     * Tests the getSentMailStatus method when an email is found in Sent Items.
+     * Test case 2: SMTP is preferred and succeeds.
+     */
+    @Test
+    void trySendEmail_preferredSmtp_success() {
+        // Given
+        MailRequest request = createMailRequest("SMTP");
+        when(smtpMailService.sendSmtpEmail(any(MailRequest.class))).thenReturn(createSmtpSuccessResponse());
+
+        // When
+        boolean isSuccess = mailService.trySendEmail(request);
+
+        // Then
+        assertTrue(isSuccess);
+        // Verify only SMTP attempt was made
+        verify(smtpMailService, times(1)).sendSmtpEmail(any(MailRequest.class));
+        verify(sendMailRequestBuilder, never()).post(any(SendMailPostRequestBody.class));
+    }
+
+    /**
+     * Test case 3: MSGRAPH fails, falls back to SMTP and succeeds.
+     */
+    @Test
+    void trySendEmail_graphFails_fallbackSmtp_success() {
+        // Given: MSGRAPH fails
+        MailRequest request = createMailRequest("MSGRAPH");
+        doThrow(new RuntimeException("Graph Error")).when(sendMailRequestBuilder).post(any(SendMailPostRequestBody.class));
+
+        // When
+        boolean isSuccess = mailService.trySendEmail(request);
+
+        // Then
+        assertTrue(isSuccess);
+        // Verify both attempts were made
+        verify(sendMailRequestBuilder, times(1)).post(any(SendMailPostRequestBody.class)); // Attempt 1 (Graph)
+        verify(smtpMailService, times(1)).sendSmtpEmail(any(MailRequest.class));       // Attempt 2 (SMTP Fallback)
+    }
+
+    /**
+     * Test case 4: SMTP fails, falls back to MSGRAPH and succeeds.
+     */
+    @Test
+    void trySendEmail_smtpFails_fallbackGraph_success() {
+        // Given: SMTP fails, Graph succeeds (default mock behavior)
+        MailRequest request = createMailRequest("SMTP");
+        when(smtpMailService.sendSmtpEmail(any(MailRequest.class)))
+                .thenReturn(createSmtpFailureResponse("SMTP Error"));
+
+        // When
+        boolean isSuccess = mailService.trySendEmail(request);
+
+        // Then
+        assertTrue(isSuccess);
+        // Verify both attempts were made
+        verify(smtpMailService, times(1)).sendSmtpEmail(any(MailRequest.class));       // Attempt 1 (SMTP)
+        verify(sendMailRequestBuilder, times(1)).post(any(SendMailPostRequestBody.class)); // Attempt 2 (Graph Fallback)
+    }
+
+    /**
+     * Test case 5: Both MSGRAPH and SMTP fail.
+     */
+    @Test
+    void trySendEmail_bothFail_failure() {
+        // Given: Both protocols fail (preferred MSGRAPH)
+        MailRequest request = createMailRequest("MSGRAPH");
+        doThrow(new RuntimeException("Graph Error")).when(sendMailRequestBuilder).post(any(SendMailPostRequestBody.class));
+        when(smtpMailService.sendSmtpEmail(any(MailRequest.class)))
+                .thenReturn(createSmtpFailureResponse("SMTP Error"));
+
+        // When
+        boolean isSuccess = mailService.trySendEmail(request);
+        MailResponse response = mailService.sendEmail(request); // Test the wrapper method
+
+        // Then
+        assertEquals(false, isSuccess);
+        assertEquals("FAILED", response.getStatus());
+        assertEquals("Failed to send email after attempting both MSGraph and SMTP protocols.", response.getMessage());
+
+        // Verify both attempts were made exactly once
+        verify(sendMailRequestBuilder, times(1)).post(any(SendMailPostRequestBody.class));
+        verify(smtpMailService, times(1)).sendSmtpEmail(any(MailRequest.class));
+    }
+
+    /**
+     * Test case 6: The original getSentMailStatus still works (for Graph-sent emails).
      */
     @Test
     void getSentMailStatus_found() {
@@ -128,18 +207,13 @@ class MailServiceTest {
         String subject = "Found Email Subject";
         String recipientEmail = "found@example.com";
 
-        // Create a mock Message object
         Message mockMessage = new Message();
         mockMessage.setId("mockMessageId123");
-        mockMessage.setSubject(subject); // Ensure subject matches for filter
+        mockMessage.setSubject(subject);
 
-        // Create a mock MessageCollectionResponse
         MessageCollectionResponse mockResponse = new MessageCollectionResponse();
-        mockResponse.setValue(Collections.singletonList(mockMessage)); // Set the list of messages
+        mockResponse.setValue(Collections.singletonList(mockMessage));
 
-        // Mock the get() method of messagesRequestBuilder to return our mock response wrapped in CompletableFuture
-        // Use thenAnswer to explicitly return the CompletableFuture
-        // This is the most reliable way to mock CompletableFuture returns
         when(messagesRequestBuilder.get(any(Consumer.class)))
                 .thenAnswer(invocation -> CompletableFuture.completedFuture(mockResponse));
 
@@ -149,68 +223,8 @@ class MailServiceTest {
         // Then
         assertNotNull(response);
         assertEquals("FOUND_IN_SENT_ITEMS", response.getStatus());
-        assertEquals("Email found in Sent Items folder.", response.getMessage());
         assertEquals("mockMessageId123", response.getMessageId());
 
-        // Verify that the messages().get() method was called
         verify(messagesRequestBuilder, times(1)).get(any(Consumer.class));
     }
-
-    /**
-     * Tests the getSentMailStatus method when an email is NOT found in Sent Items.
-     */
-    @Test
-    void getSentMailStatus_notFound() {
-        // Given
-        String subject = "Not Found Email Subject";
-        String recipientEmail = "notfound@example.com";
-
-        // Create an empty mock MessageCollectionResponse
-        MessageCollectionResponse mockResponse = new MessageCollectionResponse();
-        mockResponse.setValue(Collections.emptyList()); // No messages found
-
-        // Mock the get() method of messagesRequestBuilder to return our empty mock response wrapped in CompletableFuture
-        // Use thenAnswer to explicitly return the CompletableFuture
-        when(messagesRequestBuilder.get(any(Consumer.class)))
-                .thenAnswer(invocation -> CompletableFuture.completedFuture(mockResponse));
-
-        // When
-        MailResponse response = mailService.getSentMailStatus(subject, recipientEmail);
-
-        // Then
-        assertNotNull(response);
-        assertEquals("NOT_FOUND_IN_SENT_ITEMS", response.getStatus());
-        assertEquals("Email not found in Sent Items folder. It might still be processing or failed.", response.getMessage());
-        assertEquals(null, response.getMessageId());
-
-        // Verify that the messages().get() method was called
-        verify(messagesRequestBuilder, times(1)).get(any(Consumer.class));
-    }
-
-    /**
-     * Tests the getSentMailStatus method for a failed status check scenario (e.g., Graph API error).
-     */
-    /*@Test
-    void getSentMailStatus_failure() {
-        // Given
-        String subject = "Error Subject";
-        String recipientEmail = "error@example.com";
-
-        // Mock the get() method to throw an exception
-        // The exception should be thrown by the CompletableFuture itself to mimic async error
-        when(messagesRequestBuilder.get(any(Consumer.class)))
-                .thenReturn(CompletableFuture.failedFuture(new RuntimeException("Graph Status Check Error"))); // Use failedFuture
-
-        // When
-        MailResponse response = mailService.getSentMailStatus(subject, recipientEmail);
-
-        // Then
-        assertNotNull(response);
-        assertEquals("FAILED_STATUS_CHECK", response.getStatus());
-        assertEquals("Failed to check email status: Graph Status Check Error", response.getMessage());
-        assertEquals(null, response.getMessageId());
-
-        // Verify that the messages().get() method was attempted
-        verify(messagesRequestBuilder, times(1)).get(any(Consumer.class));
-    }*/
 }

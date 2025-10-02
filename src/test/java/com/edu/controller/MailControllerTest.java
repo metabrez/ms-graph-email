@@ -11,10 +11,9 @@ import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder; // Import MockHttpServletRequestBuilder
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.Arrays;
-import java.util.Collections;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -38,24 +37,35 @@ class MailControllerTest {
     @MockBean
     private MailService mailService; // Mocks the MailService dependency
 
+    private MailRequest createMailRequest(String protocol) {
+        MailRequest mailRequest = new MailRequest();
+        mailRequest.setSubject("Test Subject");
+        mailRequest.setBodyContent("Test Body");
+        mailRequest.setPreferredProtocol(protocol);
+        mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        return mailRequest;
+    }
+
     /**
-     * Tests the POST /api/mail/send endpoint for a successful email send.
+     * Tests the POST /api/mail/send endpoint for a successful email send
+     * (regardless of which protocol succeeded via trySendEmail).
      */
     @Test
     void sendMail_success() throws Exception {
         // Given
-        MailRequest mailRequest = new MailRequest();
-        mailRequest.setSubject("Test Subject");
-        mailRequest.setBodyContent("Test Body");
-        mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        MailRequest mailRequest = createMailRequest("MSGRAPH");
 
-        MailResponse mockResponse = new MailResponse("N/A_DirectSend", "SUCCESS", "Email send request accepted.");
+        // Mock MailService to return a final SUCCESS response
+        MailResponse mockResponse = MailResponse.builder()
+                .messageId("N/A_RobustSend")
+                .status("SUCCESS")
+                .message("Email sent successfully using preferred or fallback protocol.")
+                .build();
 
         // Mock the MailService behavior
         when(mailService.sendEmail(any(MailRequest.class))).thenReturn(mockResponse);
 
         // When & Then
-        // Corrected order: content() before contentType()
         MockHttpServletRequestBuilder requestBuilder = post("/api/mail/send")
                 .content(objectMapper.writeValueAsString(mailRequest))
                 .contentType(MediaType.APPLICATION_JSON);
@@ -63,28 +73,30 @@ class MailControllerTest {
         mockMvc.perform(requestBuilder)
                 .andExpect(status().isAccepted()) // Expect 202 Accepted
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.message").value("Email send request accepted."))
-                .andExpect(jsonPath("$.messageId").value("N/A_DirectSend"));
+                .andExpect(jsonPath("$.message").value("Email sent successfully using preferred or fallback protocol."))
+                .andExpect(jsonPath("$.messageId").value("N/A_RobustSend"));
     }
 
     /**
-     * Tests the POST /api/mail/send endpoint for a failed email send.
+     * Tests the POST /api/mail/send endpoint for a failed email send
+     * (meaning both protocols failed via trySendEmail).
      */
     @Test
     void sendMail_failure() throws Exception {
         // Given
-        MailRequest mailRequest = new MailRequest();
-        mailRequest.setSubject("Test Subject");
-        mailRequest.setBodyContent("Test Body");
-        mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        MailRequest mailRequest = createMailRequest("MSGRAPH");
 
-        MailResponse mockResponse = new MailResponse(null, "FAILED", "Failed to send email: Error");
+        // Mock MailService to return a final FAILED response
+        MailResponse mockResponse = MailResponse.builder()
+                .status("FAILED")
+                .message("Failed to send email after attempting both MSGraph and SMTP protocols.")
+                .messageId(null)
+                .build();
 
         // Mock the MailService behavior to return a failed response
         when(mailService.sendEmail(any(MailRequest.class))).thenReturn(mockResponse);
 
         // When & Then
-        // Corrected order: content() before contentType()
         MockHttpServletRequestBuilder requestBuilder = post("/api/mail/send")
                 .content(objectMapper.writeValueAsString(mailRequest))
                 .contentType(MediaType.APPLICATION_JSON);
@@ -92,12 +104,12 @@ class MailControllerTest {
         mockMvc.perform(requestBuilder)
                 .andExpect(status().isInternalServerError()) // Expect 500 Internal Server Error
                 .andExpect(jsonPath("$.status").value("FAILED"))
-                .andExpect(jsonPath("$.message").value("Failed to send email: Error"))
-                .andExpect(jsonPath("$.messageId").doesNotExist()); // messageId should be null or not present
+                .andExpect(jsonPath("$.message").value("Failed to send email after attempting both MSGraph and SMTP protocols."))
+                .andExpect(jsonPath("$.messageId").doesNotExist());
     }
 
     /**
-     * Tests the GET /api/mail/status endpoint when the email is found.
+     * Tests the GET /api/mail/status endpoint when the email is found. (No change needed here)
      */
     @Test
     void getMailStatus_found() throws Exception {
@@ -121,7 +133,7 @@ class MailControllerTest {
     }
 
     /**
-     * Tests the GET /api/mail/status endpoint when the email is not found.
+     * Tests the GET /api/mail/status endpoint when the email is not found. (No change needed here)
      */
     @Test
     void getMailStatus_notFound() throws Exception {
@@ -145,7 +157,7 @@ class MailControllerTest {
     }
 
     /**
-     * Tests the GET /api/mail/status endpoint for a failed status check.
+     * Tests the GET /api/mail/status endpoint for a failed status check. (No change needed here)
      */
     @Test
     void getMailStatus_failure() throws Exception {
