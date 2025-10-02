@@ -19,22 +19,25 @@ public class MailService {
     private static final Logger log = LoggerFactory.getLogger(MailService.class);
 
     private final GraphServiceClient graphServiceClient;
+    private final SmtpMailService smtpMailService;
 
     @Value("${graph.sender-email}") // Inject the sender email from application.yml
     private String senderEmail;
 
-    // Constructor injection for GraphServiceClient
-    public MailService(GraphServiceClient graphServiceClient) {
+    // Constructor injection for GraphServiceClient and SmtpMailService
+    public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService) {
         this.graphServiceClient = graphServiceClient;
+        this.smtpMailService = smtpMailService;
     }
 
     /**
-     * Sends an email using Microsoft Graph API.
+     * Sends an email using Microsoft Graph API with a fallback to SMTP.
      *
      * @param mailRequest The request containing email details (subject, body, recipients).
      * @return A MailResponse indicating the outcome of the send operation.
      */
     public MailResponse sendEmail(MailRequest mailRequest) {
+        log.info("Attempting to send email via Microsoft Graph...");
         try {
             // Generate a unique identifier
             String uniqueId = UUID.randomUUID().toString();
@@ -104,7 +107,7 @@ public class MailService {
                     .sendMail()
                     .post(sendMailBody);
 
-            log.info("Email sent successfully from {} to: {}", senderEmail, mailRequest.getToRecipients().stream()
+            log.info("Email sent successfully from {} to: {} via Microsoft Graph.", senderEmail, mailRequest.getToRecipients().stream()
                     .map(com.edu.model.EmailAddress::getAddress)
                     .collect(Collectors.joining(", ")));
 
@@ -115,12 +118,20 @@ public class MailService {
                     .build();
 
         } catch (Exception e) {
-            log.error("Error sending email: {}", e.getMessage(), e);
-            return MailResponse.builder()
-                    .status("FAILED")
-                    .message("Failed to send email: " + e.getMessage())
-                    .messageId(null)
-                    .build();
+            log.error("Error sending email via Microsoft Graph: {}. Falling back to SMTP...", e.getMessage(), e);
+            // Fallback to SMTP
+            MailResponse smtpResponse = smtpMailService.sendSmtpEmail(mailRequest);
+            if ("SUCCESS".equals(smtpResponse.getStatus())) {
+                log.info("Email sent successfully via SMTP.");
+                return smtpResponse;
+            } else {
+                log.error("Failed to send email via SMTP as well. Subject: {}", mailRequest.getSubject());
+                return MailResponse.builder()
+                        .status("FAILED")
+                        .message("Failed to send email via both Microsoft Graph and SMTP. Error: " + e.getMessage())
+                        .messageId(null)
+                        .build();
+            }
         }
     }
 

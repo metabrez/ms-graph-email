@@ -13,3 +13,17 @@ azure:
 # Application-specific configuration
 graph:
   sender-email: exampletest@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
+
+# SMTP Configuration
+spring:
+  mail:
+    host: smtp.your-email-provider.com
+    port: 587
+    username: your-smtp-username
+    password: your-smtp-password
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
