@@ -68,25 +68,40 @@ public class MailService {
         String fallbackProtocol = preferredProtocol.equals("MSGRAPH") ? "SMTP" : "MSGRAPH";
 
         // --- 1. Attempt with Preferred Protocol ---
-        if (preferredProtocol.equals("MSGRAPH")) {
-            MailResponse response = sendEmailViaGraph(mailRequest);
-            isSuccess = "SUCCESS".equals(response.getStatus());
-            log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
-        } else if (preferredProtocol.equals("SMTP")) {
-            MailResponse response = sendEmailViaSmtp(mailRequest);
-            isSuccess = "SUCCESS".equals(response.getStatus());
-            log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
+        switch (preferredProtocol) {
+            case "MSGRAPH":
+                MailResponse graphResponse = sendEmailViaGraph(mailRequest);
+                isSuccess = "SUCCESS".equals(graphResponse.getStatus());
+                break;
+            case "SMTP":
+                MailResponse smtpResponse = sendEmailViaSmtp(mailRequest);
+                isSuccess = "SUCCESS".equals(smtpResponse.getStatus());
+                break;
+            default:
+                log.warn("Unknown preferred protocol: {}. Defaulting to MSGRAPH for attempt 1.", preferredProtocol);
+                MailResponse defaultGraphResponse = sendEmailViaGraph(mailRequest);
+                isSuccess = "SUCCESS".equals(defaultGraphResponse.getStatus());
+                preferredProtocol = "MSGRAPH"; // Update for logging if needed
+                fallbackProtocol = "SMTP";
+                break;
         }
+        log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
+
 
         // --- 2. Retry with Fallback Protocol if needed ---
         if (!isSuccess) {
             log.warn("Attempt 1 failed. Retrying with fallback protocol: {}", fallbackProtocol);
-            if (fallbackProtocol.equals("MSGRAPH")) {
-                MailResponse response = sendEmailViaGraph(mailRequest);
-                isSuccess = "SUCCESS".equals(response.getStatus());
-            } else if (fallbackProtocol.equals("SMTP")) {
-                MailResponse response = sendEmailViaSmtp(mailRequest);
-                isSuccess = "SUCCESS".equals(response.getStatus());
+
+            switch (fallbackProtocol) {
+                case "MSGRAPH":
+                    MailResponse graphFallbackResponse = sendEmailViaGraph(mailRequest);
+                    isSuccess = "SUCCESS".equals(graphFallbackResponse.getStatus());
+                    break;
+                case "SMTP":
+                    MailResponse smtpFallbackResponse = sendEmailViaSmtp(mailRequest);
+                    isSuccess = "SUCCESS".equals(smtpFallbackResponse.getStatus());
+                    break;
+                // No default case needed here since fallbackProtocol is always one of the two
             }
             log.info("Attempt 2 ({}): Success={}", fallbackProtocol, isSuccess);
         }
@@ -97,7 +112,7 @@ public class MailService {
     /**
      * Helper method to send email via Microsoft Graph API.
      */
-    private MailResponse sendEmailViaGraph(MailRequest mailRequest) {
+    public MailResponse sendEmailViaGraph(MailRequest mailRequest) {
         try {
             // Generate a unique identifier
             String uniqueId = UUID.randomUUID().toString();
@@ -188,7 +203,7 @@ public class MailService {
      * Helper method to send email via SMTP.
      * This method simply wraps the call to the dedicated SmtpMailService.
      */
-    private MailResponse sendEmailViaSmtp(MailRequest mailRequest) {
+    public MailResponse sendEmailViaSmtp(MailRequest mailRequest) {
         return smtpMailService.sendSmtpEmail(mailRequest);
     }
 
