@@ -10,6 +10,8 @@ public class MailRequest {
     private java.util.List<EmailAddress> toRecipients; // Explicitly use java.util.List
     private java.util.List<EmailAddress> ccRecipients; // Optional, Explicitly use java.util.List
     private java.util.List<EmailAddress> bccRecipients; // Optional, Explicitly use java.util.List
+    // New field to specify preferred sending protocol (e.g., "MSGRAPH", "SMTP")
+    private String preferredProtocol = "MSGRAPH";
 
     public MailRequest() {
         // Default constructor
@@ -74,6 +76,14 @@ public class MailRequest {
         this.bccRecipients = bccRecipients;
     }
 
+    public String getPreferredProtocol() {
+        return preferredProtocol;
+    }
+
+    public void setPreferredProtocol(String preferredProtocol) {
+        this.preferredProtocol = preferredProtocol;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
@@ -84,12 +94,13 @@ public class MailRequest {
                 Objects.equals(bodyContentType, that.bodyContentType) &&
                 Objects.equals(toRecipients, that.toRecipients) &&
                 Objects.equals(ccRecipients, that.ccRecipients) &&
-                Objects.equals(bccRecipients, that.bccRecipients);
+                Objects.equals(bccRecipients, that.bccRecipients) &&
+                Objects.equals(preferredProtocol, that.preferredProtocol);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(subject, bodyContent, bodyContentType, toRecipients, ccRecipients, bccRecipients);
+        return Objects.hash(subject, bodyContent, bodyContentType, toRecipients, ccRecipients, bccRecipients, preferredProtocol);
     }
 
     @Override
@@ -101,6 +112,7 @@ public class MailRequest {
                 ", toRecipients=" + toRecipients +
                 ", ccRecipients=" + ccRecipients +
                 ", bccRecipients=" + bccRecipients +
+                ", preferredProtocol='" + preferredProtocol + '\'' +
                 '}';
     }
 

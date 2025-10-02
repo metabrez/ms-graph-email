@@ -31,13 +31,73 @@ public class MailService {
     }
 
     /**
-     * Sends an email using Microsoft Graph API with a fallback to SMTP.
+     * Primary endpoint for sending email. Uses trySendEmail for robust protocol handling.
      *
-     * @param mailRequest The request containing email details (subject, body, recipients).
+     * @param mailRequest The request containing email details (subject, body, recipients, preferred protocol).
      * @return A MailResponse indicating the outcome of the send operation.
      */
     public MailResponse sendEmail(MailRequest mailRequest) {
-        log.info("Attempting to send email via Microsoft Graph...");
+        // We now rely on trySendEmail to handle all the logic and fallbacks.
+        boolean isSuccess = trySendEmail(mailRequest);
+
+        if (isSuccess) {
+            return MailResponse.builder()
+                    .status("SUCCESS")
+                    .message("Email sent successfully using preferred or fallback protocol.")
+                    .messageId("N/A_RobustSend")
+                    .build();
+        } else {
+            return MailResponse.builder()
+                    .status("FAILED")
+                    .message("Failed to send email after attempting both MSGraph and SMTP protocols.")
+                    .messageId(null)
+                    .build();
+        }
+    }
+
+    /**
+     * Attempts to send an email using the preferred protocol, and retries with the
+     * alternative protocol if the first attempt fails.
+     *
+     * @param mailRequest The request containing email details.
+     * @return true if the email was successfully sent by either protocol, false otherwise.
+     */
+    public boolean trySendEmail(MailRequest mailRequest) {
+        boolean isSuccess = false;
+        String preferredProtocol = mailRequest.getPreferredProtocol().toUpperCase();
+        String fallbackProtocol = preferredProtocol.equals("MSGRAPH") ? "SMTP" : "MSGRAPH";
+
+        // --- 1. Attempt with Preferred Protocol ---
+        if (preferredProtocol.equals("MSGRAPH")) {
+            MailResponse response = sendEmailViaGraph(mailRequest);
+            isSuccess = "SUCCESS".equals(response.getStatus());
+            log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
+        } else if (preferredProtocol.equals("SMTP")) {
+            MailResponse response = sendEmailViaSmtp(mailRequest);
+            isSuccess = "SUCCESS".equals(response.getStatus());
+            log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
+        }
+
+        // --- 2. Retry with Fallback Protocol if needed ---
+        if (!isSuccess) {
+            log.warn("Attempt 1 failed. Retrying with fallback protocol: {}", fallbackProtocol);
+            if (fallbackProtocol.equals("MSGRAPH")) {
+                MailResponse response = sendEmailViaGraph(mailRequest);
+                isSuccess = "SUCCESS".equals(response.getStatus());
+            } else if (fallbackProtocol.equals("SMTP")) {
+                MailResponse response = sendEmailViaSmtp(mailRequest);
+                isSuccess = "SUCCESS".equals(response.getStatus());
+            }
+            log.info("Attempt 2 ({}): Success={}", fallbackProtocol, isSuccess);
+        }
+
+        return isSuccess;
+    }
+
+    /**
+     * Helper method to send email via Microsoft Graph API.
+     */
+    private MailResponse sendEmailViaGraph(MailRequest mailRequest) {
         try {
             // Generate a unique identifier
             String uniqueId = UUID.randomUUID().toString();
@@ -57,7 +117,7 @@ public class MailService {
             java.util.List<Recipient> toRecipients = mailRequest.getToRecipients().stream()
                     .map(r -> {
                         Recipient recipient = new Recipient();
-                        EmailAddress emailAddress = new EmailAddress();
+                        com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
                         emailAddress.setAddress(r.getAddress());
                         emailAddress.setName(r.getName());
                         recipient.setEmailAddress(emailAddress);
@@ -71,7 +131,7 @@ public class MailService {
                 java.util.List<Recipient> ccRecipients = mailRequest.getCcRecipients().stream()
                         .map(r -> {
                             Recipient recipient = new Recipient();
-                            EmailAddress emailAddress = new EmailAddress();
+                            com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
                             emailAddress.setAddress(r.getAddress());
                             emailAddress.setName(r.getName());
                             recipient.setEmailAddress(emailAddress);
@@ -86,7 +146,7 @@ public class MailService {
                 java.util.List<Recipient> bccRecipients = mailRequest.getBccRecipients().stream()
                         .map(r -> {
                             Recipient recipient = new Recipient();
-                            EmailAddress emailAddress = new EmailAddress();
+                            com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
                             emailAddress.setAddress(r.getAddress());
                             emailAddress.setName(r.getName());
                             recipient.setEmailAddress(emailAddress);
@@ -96,48 +156,47 @@ public class MailService {
                 message.setBccRecipients(bccRecipients);
             }
 
-            // Build the sendMail request using SendMailPostRequestBody
             SendMailPostRequestBody sendMailBody = new SendMailPostRequestBody();
             sendMailBody.setMessage(message);
             sendMailBody.setSaveToSentItems(false);
 
-            // Corrected call: The sendMail() method on the UsersItemRequestBuilder does not take arguments.
-            // The request body is passed to the post() method.
-            graphServiceClient.users().byUserId(senderEmail) // Use byUserId() to specify the user
+            graphServiceClient.users().byUserId(senderEmail)
                     .sendMail()
                     .post(sendMailBody);
 
-            log.info("Email sent successfully from {} to: {} via Microsoft Graph.", senderEmail, mailRequest.getToRecipients().stream()
+            log.info("Email sent successfully via MSGraph from {} to: {}", senderEmail, mailRequest.getToRecipients().stream()
                     .map(com.edu.model.EmailAddress::getAddress)
                     .collect(Collectors.joining(", ")));
 
             return MailResponse.builder()
                     .status("SUCCESS")
-                    .message("Email send request accepted by Microsoft Graph. It should appear in Sent Items shortly.")
-                    .messageId("N/A_DirectSend")
+                    .message("Email send request accepted by Microsoft Graph.")
+                    .messageId("N/A_GraphSend")
                     .build();
 
         } catch (Exception e) {
-            log.error("Error sending email via Microsoft Graph: {}. Falling back to SMTP...", e.getMessage(), e);
-            // Fallback to SMTP
-            MailResponse smtpResponse = smtpMailService.sendSmtpEmail(mailRequest);
-            if ("SUCCESS".equals(smtpResponse.getStatus())) {
-                log.info("Email sent successfully via SMTP.");
-                return smtpResponse;
-            } else {
-                log.error("Failed to send email via SMTP as well. Subject: {}", mailRequest.getSubject());
-                return MailResponse.builder()
-                        .status("FAILED")
-                        .message("Failed to send email via both Microsoft Graph and SMTP. Error: " + e.getMessage())
-                        .messageId(null)
-                        .build();
-            }
+            log.error("Error sending email via Microsoft Graph: {}", e.getMessage(), e);
+            return MailResponse.builder()
+                    .status("FAILED")
+                    .message("Failed to send email via MSGraph: " + e.getMessage())
+                    .messageId(null)
+                    .build();
         }
     }
 
     /**
+     * Helper method to send email via SMTP.
+     * This method simply wraps the call to the dedicated SmtpMailService.
+     */
+    private MailResponse sendEmailViaSmtp(MailRequest mailRequest) {
+        return smtpMailService.sendSmtpEmail(mailRequest);
+    }
+
+
+    /**
      * Checks the status of a sent email by searching the user's "Sent Items" folder.
      * This method searches by subject and a recipient's email address.
+     * NOTE: This status check is only valid for emails sent via MSGraph.
      *
      * @param subject The subject of the email to search for.
      * @param recipientEmail The email address of one of the recipients.

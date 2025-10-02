@@ -14,16 +14,19 @@ azure:
 graph:
   sender-email: exampletest@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
 
-# SMTP Configuration
+# --- SMTP Configuration (Required for Fallback) ---
 spring:
   mail:
-    host: smtp.your-email-provider.com
-    port: 587
-    username: your-smtp-username
-    password: your-smtp-password
+    host: smtp.your-email-provider.com # e.g., smtp.office365.com, smtp.gmail.com
+    port: 587 # or 465 for SSL/TLS
+    username: your-smtp-username # The sender's email address
+    password: your-smtp-password # The sender's app-specific password or regular password
     properties:
       mail:
         smtp:
           auth: true
           starttls:
-            enable: true
+            enable: true # Use STARTTLS for secure connection
+          connectiontimeout: 5000 # 5 seconds
+          timeout: 5000
+          writetimeout: 5000
