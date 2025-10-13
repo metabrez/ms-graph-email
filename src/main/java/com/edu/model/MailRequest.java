@@ -12,6 +12,9 @@ public class MailRequest {
     private java.util.List<EmailAddress> bccRecipients; // Optional, Explicitly use java.util.List
     // New field to specify preferred sending protocol (e.g., "MSGRAPH", "SMTP")
     private String preferredProtocol = "MSGRAPH";
+    private String trackingID ;
+    private boolean requestPixelTracking = false;
+
 
     public MailRequest() {
         // Default constructor
@@ -19,13 +22,16 @@ public class MailRequest {
 
     public MailRequest(String subject, String bodyContent, String bodyContentType,
                        List<EmailAddress> toRecipients, List<EmailAddress> ccRecipients,
-                       List<EmailAddress> bccRecipients) {
+                       List<EmailAddress> bccRecipients,  String preferredProtocol,  String trackingID,  boolean requestPixelTracking) {
         this.subject = subject;
         this.bodyContent = bodyContent;
         this.bodyContentType = bodyContentType;
         this.toRecipients = toRecipients;
         this.ccRecipients = ccRecipients;
         this.bccRecipients = bccRecipients;
+        this.preferredProtocol = preferredProtocol;
+        this.trackingID = trackingID;
+        this.requestPixelTracking = requestPixelTracking;
     }
 
     public String getSubject() {
@@ -84,24 +90,19 @@ public class MailRequest {
         this.preferredProtocol = preferredProtocol;
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) return true;
-        if (o == null || getClass() != o.getClass()) return false;
-        MailRequest that = (MailRequest) o;
-        return Objects.equals(subject, that.subject) &&
-                Objects.equals(bodyContent, that.bodyContent) &&
-                Objects.equals(bodyContentType, that.bodyContentType) &&
-                Objects.equals(toRecipients, that.toRecipients) &&
-                Objects.equals(ccRecipients, that.ccRecipients) &&
-                Objects.equals(bccRecipients, that.bccRecipients) &&
-                Objects.equals(preferredProtocol, that.preferredProtocol);
+    public String getTrackingID() {
+        return trackingID;
+    }
+    public void setTrackingID(String trackingID) {
+        this.trackingID = trackingID;
+    }
+    public boolean isRequestPixelTracking() {
+        return requestPixelTracking;
+    }
+    public void setRequestPixelTracking(boolean requestPixelTracking) {
+        this.requestPixelTracking = requestPixelTracking;
     }
 
-    @Override
-    public int hashCode() {
-        return Objects.hash(subject, bodyContent, bodyContentType, toRecipients, ccRecipients, bccRecipients, preferredProtocol);
-    }
 
     @Override
     public String toString() {
@@ -113,6 +114,8 @@ public class MailRequest {
                 ", ccRecipients=" + ccRecipients +
                 ", bccRecipients=" + bccRecipients +
                 ", preferredProtocol='" + preferredProtocol + '\'' +
+                ", trackingID='" + trackingID + '\'' +
+                ", requestPixelTracking=" + requestPixelTracking +
                 '}';
     }
 

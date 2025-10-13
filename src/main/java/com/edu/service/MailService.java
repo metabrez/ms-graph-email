@@ -24,6 +24,9 @@ public class MailService {
     @Value("${graph.sender-email}") // Inject the sender email from application.yml
     private String senderEmail;
 
+    @Value("${graph.tracking-base-url}")
+    private String trackingBaseUrl;
+
     // Constructor injection for GraphServiceClient and SmtpMailService
     public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService) {
         this.graphServiceClient = graphServiceClient;
@@ -37,6 +40,25 @@ public class MailService {
      * @return A MailResponse indicating the outcome of the send operation.
      */
     public MailResponse sendEmail(MailRequest mailRequest) {
+
+        // --- PRE-PROCESSING FOR PIXEL TRACKING ---
+        if (mailRequest.isRequestPixelTracking()) {
+            // 1. Generate unique tracking ID
+            String trackingId = UUID.randomUUID().toString();
+
+            // IMPORTANT: Set the tracking ID on the request object.
+            // This ensures the ID is retained if the request object is logged or used later.
+            mailRequest.setTrackingID(trackingId);
+
+            // 2. Inject pixel into HTML content (modifies mailRequest.bodyContent)
+            mailRequest.setBodyContent(injectTrackingPixel(mailRequest.getBodyContent(), trackingId));
+
+            // Ensure the body type is set to Html, as the pixel is always HTML
+            mailRequest.setBodyContentType("Html");
+
+            log.info("Enabled pixel tracking. Tracking ID: {}", trackingId);
+        }
+
         // We now rely on trySendEmail to handle all the logic and fallbacks.
         boolean isSuccess = trySendEmail(mailRequest);
 
@@ -53,6 +75,31 @@ public class MailService {
                     .messageId(null)
                     .build();
         }
+    }
+
+    /**
+     * Helper method to prepend an invisible tracking pixel to the email body.
+     * Includes logic to force HTTP protocol for local tunnel environments (like ngrok)
+     * to prevent security/redirect issues when hitting localhost/internal IP.
+     */
+    private String injectTrackingPixel(String originalBody, String trackingId) {
+        String baseUrl = trackingBaseUrl;
+
+        // CRITICAL FIX: If using ngrok's HTTPS URL, change the base URL to use HTTP.
+        // The ngrok tunnel already handles the HTTPS to HTTP conversion, but the browser/mail client
+        // may reject the direct HTTPS call to the local service if the URL is not corrected.
+        if (baseUrl.toLowerCase().startsWith("https://")) {
+            baseUrl = "http://" + baseUrl.substring(8);
+        }
+
+        // Construct the tracking pixel URL pointing to the new controller endpoint
+        String pixelUrl = String.format("%s/api/mail/track/%s.gif", baseUrl, trackingId);
+
+        // Create the invisible HTML image tag, using highly optimized inline CSS to prevent visibility
+        String pixelTag = String.format("<img src=\"%s\" width=\"1\" height=\"1\" border=\"0\" style=\"height:1px !important; width:1px !important; border-width:0 !important; margin-top:0 !important; margin-bottom:0 !important; margin-right:0 !important; margin-left:0 !important; padding-top:0 !important; padding-bottom:0 !important; padding-right:0 !important; padding-left:0 !important; display:block !important;\" />", pixelUrl);
+
+        // Prepend the pixel tag to the original body content
+        return pixelTag + originalBody;
     }
 
     /**
@@ -114,7 +161,7 @@ public class MailService {
      */
     public MailResponse sendEmailViaGraph(MailRequest mailRequest) {
         try {
-            // Generate a unique identifier
+            // Generate a unique identifier (Note: if tracking is enabled, ID is already set)
             String uniqueId = UUID.randomUUID().toString();
 
             // Create a new Message object

@@ -2,25 +2,29 @@
 azure:
   activedirectory:
     # Your Azure AD Application (client) ID
-    client-id: Ebnter your client azure id
+    client-id:  Enter client Id
 
     # Your Azure AD Tenant (directory) ID
-    tenant-id: Azure tenant id
+    tenant-id: Tenantid
 
     # Your Azure AD Client Secret Value (copied immediately after creation)
-    client-secret: azure client secret
+    client-secret: enter client secret
 
 # Application-specific configuration
 graph:
-  sender-email: exampletest@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
+  sender-email: example@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
+  tracking-base-url: http://localhost:8080
+  #tracking-base-url: http:// 192.168.56.1:8080
+  #tracking-base-url: https://sariah-parabolic-screamingly.ngrok-free.dev
+
 
 # --- SMTP Configuration (Required for Fallback) ---
 spring:
   mail:
-    host: smtp.your-email-provider.com # e.g., smtp.office365.com, smtp.gmail.com
+    host: smtp.office365.com # e.g., smtp.office365.com, smtp.gmail.com
     port: 587 # or 465 for SSL/TLS
-    username: your-smtp-username # The sender's email address
-    password: your-smtp-password # The sender's app-specific password or regular password
+    username: example@outlook.com # The sender's email address
+    password: givepassword # The sender's app-specific password or regular password
     properties:
       mail:
         smtp:
@@ -28,5 +32,5 @@ spring:
           starttls:
             enable: true # Use STARTTLS for secure connection
           connectiontimeout: 5000 # 5 seconds
-          timeout: 5000
-          writetimeout: 5000
+          timeout: 10000
+          writetimeout: 10000

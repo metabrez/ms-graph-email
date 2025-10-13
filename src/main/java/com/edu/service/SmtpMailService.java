@@ -2,12 +2,14 @@ package com.edu.service;
 
 import com.edu.model.MailRequest;
 import com.edu.model.MailResponse;
+import jakarta.mail.internet.MimeMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
 
 import java.util.stream.Collectors;
@@ -28,40 +30,50 @@ public class SmtpMailService {
     }
 
     /**
-     * Sends an email using the configured SMTP server.
+     * Sends an email using the configured SMTP server, supporting HTML content
+     * required for pixel tracking and robust email sending.
      *
      * @param mailRequest The request containing email details.
      * @return A MailResponse indicating the outcome.
      */
     public MailResponse sendSmtpEmail(MailRequest mailRequest) {
         try {
-            SimpleMailMessage message = new SimpleMailMessage();
-            message.setFrom(smtpUsername); // Set sender from configured username
-            message.setSubject(mailRequest.getSubject());
+            // Use MimeMessage for complex content (like HTML)
+            MimeMessage mimeMessage = mailSender.createMimeMessage();
+            // Use UTF-8 encoding
+            MimeMessageHelper messageHelper = new MimeMessageHelper(mimeMessage, "UTF-8");
 
-            // Check body content type. SimpleMailMessage only supports plain text.
-            if (mailRequest.getBodyContentType().equalsIgnoreCase("Html")) {
-                log.warn("HTML content detected for SMTP. Sending as plain text only. For full HTML support, use MimeMessageHelper.");
-            }
-            message.setText(mailRequest.getBodyContent());
+            messageHelper.setFrom(smtpUsername);
+            messageHelper.setSubject(mailRequest.getSubject());
 
-            message.setTo(mailRequest.getToRecipients().stream()
+            // Set content and determine if it should be treated as HTML
+            boolean isHtml = mailRequest.getBodyContentType().equalsIgnoreCase("Html");
+            messageHelper.setText(mailRequest.getBodyContent(), isHtml);
+
+            // Set TO recipients
+            String[] toArray = mailRequest.getToRecipients().stream()
                     .map(com.edu.model.EmailAddress::getAddress)
-                    .collect(Collectors.toList()).toArray(new String[0]));
+                    .collect(Collectors.toList()).toArray(new String[0]);
+            messageHelper.setTo(toArray);
 
+            // Set CC recipients
             if (mailRequest.getCcRecipients() != null && !mailRequest.getCcRecipients().isEmpty()) {
-                message.setCc(mailRequest.getCcRecipients().stream()
+                String[] ccArray = mailRequest.getCcRecipients().stream()
                         .map(com.edu.model.EmailAddress::getAddress)
-                        .collect(Collectors.toList()).toArray(new String[0]));
+                        .collect(Collectors.toList()).toArray(new String[0]);
+                messageHelper.setCc(ccArray);
             }
 
+            // Set BCC recipients (Must use MimeMessage directly for BCC)
             if (mailRequest.getBccRecipients() != null && !mailRequest.getBccRecipients().isEmpty()) {
-                message.setBcc(mailRequest.getBccRecipients().stream()
+                String bccList = mailRequest.getBccRecipients().stream()
                         .map(com.edu.model.EmailAddress::getAddress)
-                        .collect(Collectors.toList()).toArray(new String[0]));
+                        .collect(Collectors.joining(","));
+                // Note: Using jakarta.mail.Message.RecipientType.BCC requires the jakarta mail API
+                mimeMessage.setRecipients(jakarta.mail.Message.RecipientType.BCC, bccList);
             }
 
-            mailSender.send(message);
+            mailSender.send(mimeMessage);
 
             log.info("Email sent successfully via SMTP.");
 

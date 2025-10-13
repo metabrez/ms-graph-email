@@ -5,7 +5,9 @@ import com.edu.model.MailResponse;
 import com.edu.service.MailService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
@@ -16,6 +18,14 @@ public class MailController {
     private static final Logger log = LoggerFactory.getLogger(MailController.class);
 
     private final MailService mailService;
+
+    // A tiny 1x1 transparent GIF image in Base64 format
+    // Used to respond to tracking pixel requests without showing a broken image icon.
+    private static final byte[] TRACKING_PIXEL_GIF = {
+            0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0x01, 0x00, 0x01, 0x00, (byte) 0x80, 0x00, 0x00, (byte) 0xff, (byte) 0xff, (byte) 0xff,
+            0x00, 0x00, 0x00, 0x21, (byte) 0xf9, 0x04, 0x01, 0x0a, 0x00, 0x00, 0x00, 0x2c, 0x00, 0x00, 0x00,
+            0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x02, 0x02, 0x44, 0x01, 0x00, 0x3b
+    };
 
     // Constructor injection for MailService
     public MailController(MailService mailService) {
@@ -61,5 +71,32 @@ public class MailController {
         } else {
             return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR); // 500 Internal Server Error
         }
+    }
+
+    /**
+     * NEW: Endpoint to handle the tracking pixel hit.
+     * When a recipient opens the email, their mail client calls this endpoint.
+     *
+     * @param trackingId The unique ID embedded in the email for tracking.
+     * @return A tiny 1x1 transparent GIF image.
+     */
+    @GetMapping("/track/{trackingId}.gif")
+    public ResponseEntity<byte[]> trackMailOpen(@PathVariable String trackingId) {
+        // Log the event, which indicates the email was opened and images were loaded.
+        log.info("Email successfully opened/read. Tracking ID: {}", trackingId);
+
+        // Build headers for the image response
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.valueOf("image/gif"));
+        headers.setContentLength(TRACKING_PIXEL_GIF.length);
+        headers.setCacheControl("no-cache, no-store, must-revalidate");
+        headers.setPragma("no-cache");
+
+        // Return the transparent GIF byte array
+        return new ResponseEntity<>(TRACKING_PIXEL_GIF, headers, HttpStatus.OK);
+    }
+    @GetMapping
+    public String hello(){
+        return "Hello World";
     }
 }
