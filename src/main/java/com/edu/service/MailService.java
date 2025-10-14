@@ -41,32 +41,35 @@ public class MailService {
      */
     public MailResponse sendEmail(MailRequest mailRequest) {
 
-        // --- PRE-PROCESSING FOR PIXEL TRACKING ---
+        // --- 1. GENERATE UNIQUE SEND ID ---
+        String uniqueSendId = UUID.randomUUID().toString();
+        // Set as tracking ID for use by injection and subsequent methods
+        mailRequest.setTrackingID(uniqueSendId);
+
+        // --- 2. APPEND ID TO SUBJECT ---
+        mailRequest.setSubject(mailRequest.getSubject() + " (ID: " + uniqueSendId + ")");
+
+
+        // --- 3. PRE-PROCESSING FOR PIXEL TRACKING ---
         if (mailRequest.isRequestPixelTracking()) {
-            // 1. Generate unique tracking ID
-            String trackingId = UUID.randomUUID().toString();
 
-            // IMPORTANT: Set the tracking ID on the request object.
-            // This ensures the ID is retained if the request object is logged or used later.
-            mailRequest.setTrackingID(trackingId);
-
-            // 2. Inject pixel into HTML content (modifies mailRequest.bodyContent)
-            mailRequest.setBodyContent(injectTrackingPixel(mailRequest.getBodyContent(), trackingId));
+            // Inject pixel into HTML content (modifies mailRequest.bodyContent)
+            mailRequest.setBodyContent(injectTrackingPixel(mailRequest.getBodyContent(), uniqueSendId));
 
             // Ensure the body type is set to Html, as the pixel is always HTML
             mailRequest.setBodyContentType("Html");
 
-            log.info("Enabled pixel tracking. Tracking ID: {}", trackingId);
+            log.info("Enabled pixel tracking. Tracking ID: {}", uniqueSendId);
         }
 
-        // We now rely on trySendEmail to handle all the logic and fallbacks.
+        // --- 4. ATTEMPT SEND WITH FALLBACK ---
         boolean isSuccess = trySendEmail(mailRequest);
 
         if (isSuccess) {
             return MailResponse.builder()
                     .status("SUCCESS")
                     .message("Email sent successfully using preferred or fallback protocol.")
-                    .messageId("N/A_RobustSend")
+                    .messageId(uniqueSendId) // Return the unique ID on success
                     .build();
         } else {
             return MailResponse.builder()
@@ -86,10 +89,12 @@ public class MailService {
         String baseUrl = trackingBaseUrl;
 
         // CRITICAL FIX: If using ngrok's HTTPS URL, change the base URL to use HTTP.
-        // The ngrok tunnel already handles the HTTPS to HTTP conversion, but the browser/mail client
-        // may reject the direct HTTPS call to the local service if the URL is not corrected.
-        if (baseUrl.toLowerCase().startsWith("https://")) {
+        // This addresses security issues in clients that don't trust local HTTPS origins.
+        if (baseUrl != null && baseUrl.toLowerCase().startsWith("https://")) {
             baseUrl = "http://" + baseUrl.substring(8);
+        } else if (baseUrl == null) {
+            log.warn("trackingBaseUrl is null. Cannot inject pixel.");
+            return originalBody;
         }
 
         // Construct the tracking pixel URL pointing to the new controller endpoint
@@ -161,13 +166,13 @@ public class MailService {
      */
     public MailResponse sendEmailViaGraph(MailRequest mailRequest) {
         try {
-            // Generate a unique identifier (Note: if tracking is enabled, ID is already set)
-            String uniqueId = UUID.randomUUID().toString();
+            // Note: MSGraph internally generates its own Message ID,
+            // but we use the mailRequest.getTrackingID() for our internal reference.
 
             // Create a new Message object
             Message message = new Message();
-            // Append the unique ID to the subject
-            message.setSubject(mailRequest.getSubject() + " - " + uniqueId);
+            // The subject already contains the unique send ID
+            message.setSubject(mailRequest.getSubject());
 
             // Set the email body content and type
             ItemBody body = new ItemBody();
@@ -230,10 +235,11 @@ public class MailService {
                     .map(com.edu.model.EmailAddress::getAddress)
                     .collect(Collectors.joining(", ")));
 
+            // Return the uniqueSendId passed from the main sendEmail method.
             return MailResponse.builder()
                     .status("SUCCESS")
                     .message("Email send request accepted by Microsoft Graph.")
-                    .messageId("N/A_GraphSend")
+                    .messageId(mailRequest.getTrackingID())
                     .build();
 
         } catch (Exception e) {
@@ -251,6 +257,7 @@ public class MailService {
      * This method simply wraps the call to the dedicated SmtpMailService.
      */
     public MailResponse sendEmailViaSmtp(MailRequest mailRequest) {
+        // SMTP service will return the uniqueSendId passed in mailRequest.getTrackingID()
         return smtpMailService.sendSmtpEmail(mailRequest);
     }
 
@@ -266,6 +273,7 @@ public class MailService {
      */
     public MailResponse getSentMailStatus(String subject, String recipientEmail) {
         try {
+            // Note: The subject now contains the unique ID, which is good for searching.
             String filter = String.format("subject eq '%s' and toRecipients/any(r:r/emailAddress/address eq '%s')",
                     subject, recipientEmail);
 
