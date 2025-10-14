@@ -8,7 +8,6 @@ import com.microsoft.graph.models.MessageCollectionResponse;
 import com.microsoft.graph.serviceclient.GraphServiceClient;
 import com.microsoft.graph.users.item.UserItemRequestBuilder;
 import com.microsoft.graph.users.item.messages.MessagesRequestBuilder;
-import com.microsoft.graph.users.item.sendmail.SendMailRequestBuilder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
@@ -18,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
@@ -27,10 +27,6 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit tests for the MailService class, focusing on the trySendEmail failover logic.
- *
- * NOTE: Since the MailService.java implementation uses private helper methods
- * (sendEmailViaGraph, sendEmailViaSmtp), we use Mockito's Spy/Reflection
- * to mock these specific methods to isolate and test the core trySendEmail switching logic.
  */
 class MailServiceTest {
 
@@ -38,7 +34,7 @@ class MailServiceTest {
     private GraphServiceClient graphServiceClient;
 
     @Mock
-    private SmtpMailService smtpMailService; // Mocked, although we mock its usage via reflection below
+    private SmtpMailService smtpMailService;
 
     // Mocks for Graph status check
     @Mock
@@ -50,24 +46,46 @@ class MailServiceTest {
     private MailService mailServiceSpy; // Use a spy to mock private methods
 
     private final String SENDER_EMAIL = "sender@example.com";
-    private final MailRequest successfulMailRequest = new MailRequest();
+    private MailRequest successfulMailRequest; // Changed to be initialized in setup
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        // We use a spy to partially mock the MailService, allowing us to mock private methods
-        // like sendEmailViaGraph and sendEmailViaSmtp which are critical to trySendEmail logic.
         mailServiceSpy = spy(new MailService(graphServiceClient, smtpMailService));
-
-        // Inject the @Value field for senderEmail
         ReflectionTestUtils.setField(mailServiceSpy, "senderEmail", SENDER_EMAIL);
 
-        // Setup common test request
-        successfulMailRequest.setSubject("Test Subject");
-        successfulMailRequest.setBodyContent("Test Body");
-        successfulMailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        // --- Setup common test request (FIXED for nested structure) ---
 
-        // Setup Mocks for Graph Status Check
+        MailRequest request = new MailRequest();
+
+        // 1. Create Body Model
+        MailRequest.BodyModel body = new MailRequest.BodyModel();
+        body.setContentType("Text");
+        body.setContent("Test Body Content");
+
+        // 2. Create Recipient Model
+        List<MailRequest.RecipientModel> toRecipients = Arrays.asList(
+                new MailRequest.RecipientModel(new EmailAddress("recipient@example.com", "Recipient Name"))
+        );
+
+        // 3. Create Message Model
+        MailRequest.MessageModel message = new MailRequest.MessageModel();
+        message.setSubject("Test Subject");
+        message.setBody(body);
+        message.setToRecipients(toRecipients);
+        message.setCcRecipients(Arrays.asList());
+        message.setBccRecipients(Arrays.asList());
+
+        // 4. Set Message and top-level fields
+        request.setMessage(message);
+        request.setSaveToSentItems(false);
+        request.setTrackingID("test-tracking-id");
+        request.setRequestPixelTracking(false); // Default to false for these tests
+
+        // Initialize the class field
+        successfulMailRequest = request;
+
+        // --- Setup Mocks for Graph Status Check ---
         when(graphServiceClient.users()).thenReturn(mock(com.microsoft.graph.users.UsersRequestBuilder.class));
         when(graphServiceClient.users().byUserId(SENDER_EMAIL)).thenReturn(userItemRequestBuilder);
         when(userItemRequestBuilder.messages()).thenReturn(messagesRequestBuilder);
@@ -233,6 +251,7 @@ class MailServiceTest {
         // Then
         assertEquals("SUCCESS", response.getStatus());
         assertEquals("Email sent successfully using preferred or fallback protocol.", response.getMessage());
+        // Note: uniqueId is generated inside sendEmail, so we verify structure/status
     }
 
     @Test
@@ -297,8 +316,20 @@ class MailServiceTest {
         assertEquals("NOT_FOUND_IN_SENT_ITEMS", response.getStatus());
     }
 
-    // Since sendEmailViaGraph is a private method, we don't test it directly here.
-    // Assuming the internals of sendEmailViaGraph and sendEmailViaSmtp are covered
-    // by individual tests (if they were public) or integration tests. The focus here
-    // is on the orchestration logic of trySendEmail.
+    @Test
+    void getSentMailStatus_failure() throws Exception {
+        // Given
+        String subject = "Error Email";
+        String recipientEmail = "error@example.com";
+
+        // Mock the get() method to throw an exception
+        when(messagesRequestBuilder.get(any(Consumer.class)))
+                .thenThrow(new RuntimeException("Graph API Error"));
+
+        // When
+        MailResponse response = mailServiceSpy.getSentMailStatus(subject, recipientEmail);
+
+        // Then
+        assertEquals("FAILED_STATUS_CHECK", response.getStatus());
+    }
 }

@@ -2,20 +2,19 @@
 azure:
   activedirectory:
     # Your Azure AD Application (client) ID
-    client-id:  Enter client Id
+    client-id:  asda
 
     # Your Azure AD Tenant (directory) ID
-    tenant-id: Tenantid
+    tenant-id: aada
 
     # Your Azure AD Client Secret Value (copied immediately after creation)
-    client-secret: enter client secret
+    client-secret: asddf
 
 # Application-specific configuration
 graph:
-  sender-email: example@outlook.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
+  sender-email: asdf # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
   tracking-base-url: http://localhost:8080
-  #tracking-base-url: http:// 192.168.56.1:8080
-  #tracking-base-url: https://sariah-parabolic-screamingly.ngrok-free.dev
+
 
 
 # --- SMTP Configuration (Required for Fallback) ---
@@ -23,8 +22,8 @@ spring:
   mail:
     host: smtp.office365.com # e.g., smtp.office365.com, smtp.gmail.com
     port: 587 # or 465 for SSL/TLS
-    username: example@outlook.com # The sender's email address
-    password: givepassword # The sender's app-specific password or regular password
+    username: asdf # The sender's email address
+    password: asdf # The sender's app-specific password or regular password
     properties:
       mail:
         smtp:

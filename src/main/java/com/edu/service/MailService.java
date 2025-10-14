@@ -11,6 +11,8 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.util.UUID;
+import java.util.List;
+import java.util.Arrays;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,47 +36,94 @@ public class MailService {
     }
 
     /**
-     * Primary endpoint for sending email. Uses trySendEmail for robust protocol handling.
+     * Primary endpoint for sending email. Now iterates through recipients and sends a personalized copy to each.
      *
-     * @param mailRequest The request containing email details (subject, body, recipients, preferred protocol).
+     * @param originalRequest The request containing email details (subject, body, recipients, preferred protocol).
      * @return A MailResponse indicating the outcome of the send operation.
      */
-    public MailResponse sendEmail(MailRequest mailRequest) {
+    public MailResponse sendEmail(MailRequest originalRequest) {
 
-        // --- 1. GENERATE UNIQUE SEND ID ---
-        String uniqueSendId = UUID.randomUUID().toString();
-        // Set as tracking ID for use by injection and subsequent methods
-        mailRequest.setTrackingID(uniqueSendId);
+        // --- Accessing nested message model ---
+        MailRequest.MessageModel messageModel = originalRequest.getMessage();
+        List<MailRequest.RecipientModel> originalToRecipients = messageModel.getToRecipients();
 
-        // --- 2. APPEND ID TO SUBJECT ---
-        mailRequest.setSubject(mailRequest.getSubject() + " (ID: " + uniqueSendId + ")");
-
-
-        // --- 3. PRE-PROCESSING FOR PIXEL TRACKING ---
-        if (mailRequest.isRequestPixelTracking()) {
-
-            // Inject pixel into HTML content (modifies mailRequest.bodyContent)
-            mailRequest.setBodyContent(injectTrackingPixel(mailRequest.getBodyContent(), uniqueSendId));
-
-            // Ensure the body type is set to Html, as the pixel is always HTML
-            mailRequest.setBodyContentType("Html");
-
-            log.info("Enabled pixel tracking. Tracking ID: {}", uniqueSendId);
+        if (originalToRecipients == null || originalToRecipients.isEmpty()) {
+            return MailResponse.builder()
+                    .status("FAILED")
+                    .message("No recipients found in toRecipients list.")
+                    .messageId(null)
+                    .build();
         }
 
-        // --- 4. ATTEMPT SEND WITH FALLBACK ---
-        boolean isSuccess = trySendEmail(mailRequest);
+        // Generate a single UUID that represents the entire send campaign/batch.
+        String uniqueGroupId = UUID.randomUUID().toString();
 
-        if (isSuccess) {
+        log.info("Starting batch send (Group ID: {} ) to {} recipients.", uniqueGroupId, originalToRecipients.size());
+
+        // --- 1. PREPARE STATIC PARTS ---
+        // Store original CC/BCC lists (they will be copied to every recipient's cloned message)
+        List<MailRequest.RecipientModel> originalCcRecipients = messageModel.getCcRecipients();
+        List<MailRequest.RecipientModel> originalBccRecipients = messageModel.getBccRecipients();
+
+        // --- 2. LOOP THROUGH RECIPIENTS AND SEND UNIQUE COPIES ---
+        boolean anySuccess = false;
+
+        for (MailRequest.RecipientModel individualRecipient : originalToRecipients) {
+
+            // Create a unique ID for this specific recipient and message copy
+            String individualTrackingId = uniqueGroupId + "-" + UUID.randomUUID().toString().substring(0, 8);
+
+            // Clone the request object for modification
+            MailRequest mailRequestCopy = originalRequest.deepCopy();
+            MailRequest.MessageModel copyMessageModel = mailRequestCopy.getMessage();
+            MailRequest.BodyModel copyBodyModel = copyMessageModel.getBody();
+
+            // Set the unique ID for this recipient's pixel and the API response tracking.
+            mailRequestCopy.setTrackingID(individualTrackingId);
+
+            // --- Set Subject and Recipients ---
+            // 1. Set the individual as the ONLY ToRecipients
+            copyMessageModel.setToRecipients(Arrays.asList(individualRecipient));
+            // 2. Append the group ID to the subject
+            copyMessageModel.setSubject(messageModel.getSubject() + " (Batch ID: " + uniqueGroupId + ")");
+            // 3. Re-assign CC/BCC (optional, if you want them in the individual copies)
+            copyMessageModel.setCcRecipients(originalCcRecipients);
+            copyMessageModel.setBccRecipients(originalBccRecipients);
+
+
+            // --- 4. PIXEL TRACKING INJECTION ---
+            if (mailRequestCopy.isRequestPixelTracking()) {
+
+                // Inject pixel into HTML content (modifies content with individualTrackingId)
+                copyBodyModel.setContent(injectTrackingPixel(copyBodyModel.getContent(), individualTrackingId));
+                copyBodyModel.setContentType("Html");
+
+                log.info("-> Preparing copy for {} with individual Tracking ID: {}",
+                        individualRecipient.getEmailAddress().getAddress(), individualTrackingId);
+            }
+
+
+            // --- 5. ATTEMPT SEND ---
+            if (trySendEmail(mailRequestCopy)) {
+                anySuccess = true;
+            }
+
+            // CRITICAL FIX: Log the completion status for the individual recipient.
+            log.info("Finished attempt for recipient: {} (Individual ID: {})",
+                    individualRecipient.getEmailAddress().getAddress(), individualTrackingId);
+        }
+
+        // --- 6. RETURN GROUP STATUS ---
+        if (anySuccess) {
             return MailResponse.builder()
                     .status("SUCCESS")
-                    .message("Email sent successfully using preferred or fallback protocol.")
-                    .messageId(uniqueSendId) // Return the unique ID on success
+                    .message("Batch send initiated. At least one email was sent successfully. Use Group ID for reference.")
+                    .messageId(uniqueGroupId) // Return the Group ID
                     .build();
         } else {
             return MailResponse.builder()
                     .status("FAILED")
-                    .message("Failed to send email after attempting both MSGraph and SMTP protocols.")
+                    .message("Failed to send email to any recipient after attempting both MSGraph and SMTP protocols.")
                     .messageId(null)
                     .build();
         }
@@ -82,14 +131,11 @@ public class MailService {
 
     /**
      * Helper method to prepend an invisible tracking pixel to the email body.
-     * Includes logic to force HTTP protocol for local tunnel environments (like ngrok)
-     * to prevent security/redirect issues when hitting localhost/internal IP.
      */
     private String injectTrackingPixel(String originalBody, String trackingId) {
         String baseUrl = trackingBaseUrl;
 
         // CRITICAL FIX: If using ngrok's HTTPS URL, change the base URL to use HTTP.
-        // This addresses security issues in clients that don't trust local HTTPS origins.
         if (baseUrl != null && baseUrl.toLowerCase().startsWith("https://")) {
             baseUrl = "http://" + baseUrl.substring(8);
         } else if (baseUrl == null) {
@@ -110,55 +156,96 @@ public class MailService {
     /**
      * Attempts to send an email using the preferred protocol, and retries with the
      * alternative protocol if the first attempt fails.
-     *
-     * @param mailRequest The request containing email details.
-     * @return true if the email was successfully sent by either protocol, false otherwise.
      */
     public boolean trySendEmail(MailRequest mailRequest) {
         boolean isSuccess = false;
         String preferredProtocol = mailRequest.getPreferredProtocol().toUpperCase();
         String fallbackProtocol = preferredProtocol.equals("MSGRAPH") ? "SMTP" : "MSGRAPH";
 
+        // --- Prepare contextual logging info ---
+        String recipient = mailRequest.getMessage().getToRecipients().stream()
+                .findFirst()
+                .map(r -> r.getEmailAddress().getAddress())
+                .orElse("UNKNOWN_RECIPIENT");
+
+        // Safely extract the batch ID from the full tracking ID
+        String fullTrackingId = mailRequest.getTrackingID();
+        String batchId = fullTrackingId != null && fullTrackingId.contains("-")
+                ? fullTrackingId.substring(0, fullTrackingId.indexOf('-'))
+                : "N/A";
+
+        // Log the start of the attempt for this specific recipient
+        log.info("--- Attempting send for {} (Batch ID: {}) ---", recipient, batchId);
+
+
         // --- 1. Attempt with Preferred Protocol ---
         switch (preferredProtocol) {
             case "MSGRAPH":
                 MailResponse graphResponse = sendEmailViaGraph(mailRequest);
                 isSuccess = "SUCCESS".equals(graphResponse.getStatus());
+                log.info("Attempt 1 (MSGRAPH) for {}: Success={}", recipient, isSuccess);
                 break;
             case "SMTP":
                 MailResponse smtpResponse = sendEmailViaSmtp(mailRequest);
                 isSuccess = "SUCCESS".equals(smtpResponse.getStatus());
+                // The SMTP service logs its own success message, so we only need the generic attempt status here.
+                log.info("Attempt 1 (SMTP) for {}: Success={}", recipient, isSuccess);
                 break;
             default:
                 log.warn("Unknown preferred protocol: {}. Defaulting to MSGRAPH for attempt 1.", preferredProtocol);
                 MailResponse defaultGraphResponse = sendEmailViaGraph(mailRequest);
                 isSuccess = "SUCCESS".equals(defaultGraphResponse.getStatus());
-                preferredProtocol = "MSGRAPH"; // Update for logging if needed
-                fallbackProtocol = "SMTP";
                 break;
         }
-        log.info("Attempt 1 ({}): Success={}", preferredProtocol, isSuccess);
-
 
         // --- 2. Retry with Fallback Protocol if needed ---
         if (!isSuccess) {
-            log.warn("Attempt 1 failed. Retrying with fallback protocol: {}", fallbackProtocol);
+            log.warn("Attempt 1 failed for {}. Retrying with fallback protocol: {}", recipient, fallbackProtocol);
 
             switch (fallbackProtocol) {
                 case "MSGRAPH":
                     MailResponse graphFallbackResponse = sendEmailViaGraph(mailRequest);
                     isSuccess = "SUCCESS".equals(graphFallbackResponse.getStatus());
+                    log.info("Attempt 2 (MSGRAPH) for {}: Success={}", recipient, isSuccess);
                     break;
                 case "SMTP":
                     MailResponse smtpFallbackResponse = sendEmailViaSmtp(mailRequest);
                     isSuccess = "SUCCESS".equals(smtpFallbackResponse.getStatus());
+                    // The SMTP service logs its own success message, so we only need the generic attempt status here.
+                    log.info("Attempt 2 (SMTP) for {}: Success={}", recipient, isSuccess);
                     break;
                 // No default case needed here since fallbackProtocol is always one of the two
             }
-            log.info("Attempt 2 ({}): Success={}", fallbackProtocol, isSuccess);
         }
 
+        // Log final outcome of this specific recipient's transmission attempt
+        log.info("--- Transmission complete for {} (Success: {}) ---", recipient, isSuccess);
+
+
         return isSuccess;
+    }
+
+    // ... (Helper methods for Graph/SMTP remain below) ...
+
+    /**
+     * Helper method to convert our MailRequest structure to MS Graph SDK structure
+     */
+    private com.microsoft.graph.models.EmailAddress toGraphEmailAddress(com.edu.model.EmailAddress appEmail) {
+        com.microsoft.graph.models.EmailAddress graphEmail = new com.microsoft.graph.models.EmailAddress();
+        graphEmail.setAddress(appEmail.getAddress());
+        graphEmail.setName(appEmail.getName());
+        return graphEmail;
+    }
+
+    /**
+     * Helper method to convert our MailRequest structure to MS Graph SDK structure
+     */
+    private Recipient toGraphRecipient(MailRequest.RecipientModel appRecipient) {
+        Recipient graphRecipient = new Recipient();
+        if (appRecipient != null && appRecipient.getEmailAddress() != null) {
+            graphRecipient.setEmailAddress(toGraphEmailAddress(appRecipient.getEmailAddress()));
+        }
+        return graphRecipient;
     }
 
     /**
@@ -166,76 +253,50 @@ public class MailService {
      */
     public MailResponse sendEmailViaGraph(MailRequest mailRequest) {
         try {
-            // Note: MSGraph internally generates its own Message ID,
-            // but we use the mailRequest.getTrackingID() for our internal reference.
+            MailRequest.MessageModel appMessage = mailRequest.getMessage();
 
             // Create a new Message object
             Message message = new Message();
-            // The subject already contains the unique send ID
-            message.setSubject(mailRequest.getSubject());
+            message.setSubject(appMessage.getSubject());
 
             // Set the email body content and type
             ItemBody body = new ItemBody();
-            body.setContentType(mailRequest.getBodyContentType().equalsIgnoreCase("Html") ? BodyType.Html : BodyType.Text);
-            body.setContent(mailRequest.getBodyContent());
+            body.setContentType(appMessage.getBody().getContentType().equalsIgnoreCase("Html") ? BodyType.Html : BodyType.Text);
+            body.setContent(appMessage.getBody().getContent());
             message.setBody(body);
 
             // Add 'To' recipients
-            java.util.List<Recipient> toRecipients = mailRequest.getToRecipients().stream()
-                    .map(r -> {
-                        Recipient recipient = new Recipient();
-                        com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
-                        emailAddress.setAddress(r.getAddress());
-                        emailAddress.setName(r.getName());
-                        recipient.setEmailAddress(emailAddress);
-                        return recipient;
-                    })
+            java.util.List<Recipient> toRecipients = appMessage.getToRecipients().stream()
+                    .map(this::toGraphRecipient)
                     .collect(Collectors.toList());
             message.setToRecipients(toRecipients);
 
             // Add 'CC' recipients if provided
-            if (mailRequest.getCcRecipients() != null && !mailRequest.getCcRecipients().isEmpty()) {
-                java.util.List<Recipient> ccRecipients = mailRequest.getCcRecipients().stream()
-                        .map(r -> {
-                            Recipient recipient = new Recipient();
-                            com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
-                            emailAddress.setAddress(r.getAddress());
-                            emailAddress.setName(r.getName());
-                            recipient.setEmailAddress(emailAddress);
-                            return recipient;
-                        })
+            if (appMessage.getCcRecipients() != null && !appMessage.getCcRecipients().isEmpty()) {
+                java.util.List<Recipient> ccRecipients = appMessage.getCcRecipients().stream()
+                        .map(this::toGraphRecipient)
                         .collect(Collectors.toList());
                 message.setCcRecipients(ccRecipients);
             }
 
             // Add 'BCC' recipients if provided
-            if (mailRequest.getBccRecipients() != null && !mailRequest.getBccRecipients().isEmpty()) {
-                java.util.List<Recipient> bccRecipients = mailRequest.getBccRecipients().stream()
-                        .map(r -> {
-                            Recipient recipient = new Recipient();
-                            com.microsoft.graph.models.EmailAddress emailAddress = new com.microsoft.graph.models.EmailAddress();
-                            emailAddress.setAddress(r.getAddress());
-                            emailAddress.setName(r.getName());
-                            recipient.setEmailAddress(emailAddress);
-                            return recipient;
-                        })
+            if (appMessage.getBccRecipients() != null && !appMessage.getBccRecipients().isEmpty()) {
+                java.util.List<Recipient> bccRecipients = appMessage.getBccRecipients().stream()
+                        .map(this::toGraphRecipient)
                         .collect(Collectors.toList());
                 message.setBccRecipients(bccRecipients);
             }
 
             SendMailPostRequestBody sendMailBody = new SendMailPostRequestBody();
             sendMailBody.setMessage(message);
-            sendMailBody.setSaveToSentItems(false);
+            sendMailBody.setSaveToSentItems(mailRequest.getSaveToSentItems());
+
+            log.info("Sending via MSGraph: Subject='{}', Sender='{}'", appMessage.getSubject(), senderEmail);
 
             graphServiceClient.users().byUserId(senderEmail)
                     .sendMail()
                     .post(sendMailBody);
 
-            log.info("Email sent successfully via MSGraph from {} to: {}", senderEmail, mailRequest.getToRecipients().stream()
-                    .map(com.edu.model.EmailAddress::getAddress)
-                    .collect(Collectors.joining(", ")));
-
-            // Return the uniqueSendId passed from the main sendEmail method.
             return MailResponse.builder()
                     .status("SUCCESS")
                     .message("Email send request accepted by Microsoft Graph.")
@@ -254,22 +315,14 @@ public class MailService {
 
     /**
      * Helper method to send email via SMTP.
-     * This method simply wraps the call to the dedicated SmtpMailService.
      */
     public MailResponse sendEmailViaSmtp(MailRequest mailRequest) {
-        // SMTP service will return the uniqueSendId passed in mailRequest.getTrackingID()
         return smtpMailService.sendSmtpEmail(mailRequest);
     }
 
 
     /**
      * Checks the status of a sent email by searching the user's "Sent Items" folder.
-     * This method searches by subject and a recipient's email address.
-     * NOTE: This status check is only valid for emails sent via MSGraph.
-     *
-     * @param subject The subject of the email to search for.
-     * @param recipientEmail The email address of one of the recipients.
-     * @return A MailResponse indicating if the email was found in Sent Items.
      */
     public MailResponse getSentMailStatus(String subject, String recipientEmail) {
         try {

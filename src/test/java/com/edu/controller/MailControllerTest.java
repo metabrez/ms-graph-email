@@ -14,6 +14,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
 import java.util.Arrays;
+import java.util.List;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -21,8 +22,6 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
-
-
 
 
 @WebMvcTest(MailController.class) // Focuses on testing MailController
@@ -37,12 +36,35 @@ class MailControllerTest {
     @MockBean
     private MailService mailService; // Mocks the MailService dependency
 
+    /**
+     * Helper method to create a MailRequest instance with the new nested structure.
+     */
     private MailRequest createMailRequest(String protocol) {
         MailRequest mailRequest = new MailRequest();
-        mailRequest.setSubject("Test Subject");
-        mailRequest.setBodyContent("Test Body");
+
+        // 1. Create Body Model
+        MailRequest.BodyModel body = new MailRequest.BodyModel();
+        body.setContentType("Text");
+        body.setContent("Test Body");
+
+        // 2. Create Recipients Model
+        List<MailRequest.RecipientModel> toRecipients = Arrays.asList(
+                new MailRequest.RecipientModel(new EmailAddress("recipient@example.com", "Recipient Name"))
+        );
+
+        // 3. Create Message Model (contains Subject, Body, Recipients)
+        MailRequest.MessageModel message = new MailRequest.MessageModel();
+        message.setSubject("Test Subject");
+        message.setBody(body);
+        message.setToRecipients(toRecipients);
+        message.setCcRecipients(Arrays.asList()); // Ensure CC is initialized
+        message.setBccRecipients(Arrays.asList()); // Ensure BCC is initialized
+
+        // 4. Set Message and top-level fields
+        mailRequest.setMessage(message);
         mailRequest.setPreferredProtocol(protocol);
-        mailRequest.setToRecipients(Arrays.asList(new EmailAddress("recipient@example.com", "Recipient Name")));
+        mailRequest.setSaveToSentItems(false); // Default value
+
         return mailRequest;
     }
 
@@ -55,9 +77,12 @@ class MailControllerTest {
         // Given
         MailRequest mailRequest = createMailRequest("MSGRAPH");
 
+        // Use a mock UUID that the MailService would return
+        String uniqueId = "test-unique-id";
+
         // Mock MailService to return a final SUCCESS response
         MailResponse mockResponse = MailResponse.builder()
-                .messageId("N/A_RobustSend")
+                .messageId(uniqueId)
                 .status("SUCCESS")
                 .message("Email sent successfully using preferred or fallback protocol.")
                 .build();
@@ -74,7 +99,7 @@ class MailControllerTest {
                 .andExpect(status().isAccepted()) // Expect 202 Accepted
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
                 .andExpect(jsonPath("$.message").value("Email sent successfully using preferred or fallback protocol."))
-                .andExpect(jsonPath("$.messageId").value("N/A_RobustSend"));
+                .andExpect(jsonPath("$.messageId").value(uniqueId));
     }
 
     /**

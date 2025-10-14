@@ -1,0 +1,25 @@
+{
+  "message": {
+    "subject": "Refactored API Test",
+    "body": {
+      "contentType": "Html",
+      "content": "<h1>Hello, API is standardized!</h1><p>Please approve the request.</p>"
+    },
+    "toRecipients": [
+      {
+        "emailAddress": {
+          "address": "test@example.com",
+          "name": "Testing"
+        }
+      }
+    ],
+    "ccRecipients": [
+      {
+
+      }
+    ]
+  },
+  "saveToSentItems": false,
+  "preferredProtocol": "MSGRAPH",
+  "requestPixelTracking": true
+}

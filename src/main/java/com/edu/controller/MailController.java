@@ -11,6 +11,8 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.stream.Collectors;
+
 @RestController
 @RequestMapping("/api/mail")
 public class MailController {
@@ -38,10 +40,22 @@ public class MailController {
      * @param mailRequest The JSON payload containing email details.
      * @return ResponseEntity with MailResponse and HTTP status.
      */
+    /**
+     * Endpoint to send an email.
+     *
+     * @param mailRequest The JSON payload containing email details.
+     * @return ResponseEntity with MailResponse and HTTP status.
+     */
     @PostMapping("/send")
     public ResponseEntity<MailResponse> sendMail(@RequestBody MailRequest mailRequest) {
-        log.info("Received request to send email. Subject: {}, To: {}",
-                mailRequest.getSubject(), mailRequest.getToRecipients());
+        // Access nested fields for logging
+        String subject = mailRequest.getMessage().getSubject();
+        String toRecipients = mailRequest.getMessage().getToRecipients().stream()
+                .map(r -> r.getEmailAddress().getAddress())
+                .collect(Collectors.joining(", "));
+
+        log.info("Received request to send email. Subject: {}, To: {}", subject, toRecipients);
+
         MailResponse response = mailService.sendEmail(mailRequest);
         if ("SUCCESS".equals(response.getStatus())) {
             return new ResponseEntity<>(response, HttpStatus.ACCEPTED); // 202 Accepted
