@@ -70,8 +70,11 @@ public class MailService {
 
         for (MailRequest.RecipientModel individualRecipient : originalToRecipients) {
 
+            String recipientEmail = individualRecipient.getEmailAddress().getAddress();
+
             // Create a unique ID for this specific recipient and message copy
-            String individualTrackingId = uniqueGroupId + "-" + UUID.randomUUID().toString().substring(0, 8);
+            // FORMAT: [GroupID]-[Short_Random_Suffix]-[RecipientEmail]
+            String individualTrackingId = uniqueGroupId + "-" + UUID.randomUUID().toString().substring(0, 8) + "-" + recipientEmail;
 
             // Clone the request object for modification
             MailRequest mailRequestCopy = originalRequest.deepCopy();
@@ -99,7 +102,7 @@ public class MailService {
                 copyBodyModel.setContentType("Html");
 
                 log.info("-> Preparing copy for {} with individual Tracking ID: {}",
-                        individualRecipient.getEmailAddress().getAddress(), individualTrackingId);
+                        recipientEmail, individualTrackingId);
             }
 
 
@@ -110,7 +113,7 @@ public class MailService {
 
             // CRITICAL FIX: Log the completion status for the individual recipient.
             log.info("Finished attempt for recipient: {} (Individual ID: {})",
-                    individualRecipient.getEmailAddress().getAddress(), individualTrackingId);
+                    recipientEmail, individualTrackingId);
         }
 
         // --- 6. RETURN GROUP STATUS ---
