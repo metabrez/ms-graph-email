@@ -10,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
+import java.time.LocalDateTime; // NEW IMPORT
 import java.util.UUID;
 import java.util.List;
 import java.util.Arrays;
@@ -22,6 +23,7 @@ public class MailService {
 
     private final GraphServiceClient graphServiceClient;
     private final SmtpMailService smtpMailService;
+    private final EmailTrackingService emailTrackingService; // <-- NEW FIELD
 
     @Value("${graph.sender-email}") // Inject the sender email from application.yml
     private String senderEmail;
@@ -29,10 +31,11 @@ public class MailService {
     @Value("${graph.tracking-base-url}")
     private String trackingBaseUrl;
 
-    // Constructor injection for GraphServiceClient and SmtpMailService
-    public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService) {
+    // Constructor injection for all services
+    public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService, EmailTrackingService emailTrackingService) { // <-- MODIFIED
         this.graphServiceClient = graphServiceClient;
         this.smtpMailService = smtpMailService;
+        this.emailTrackingService = emailTrackingService; // <-- INJECTED
     }
 
     /**
@@ -88,7 +91,9 @@ public class MailService {
             // 1. Set the individual as the ONLY ToRecipients
             copyMessageModel.setToRecipients(Arrays.asList(individualRecipient));
             // 2. Append the group ID to the subject
-            copyMessageModel.setSubject(messageModel.getSubject() + " (Batch ID: " + uniqueGroupId + ")");
+            // NOTE: Subject modification should ideally only be for debugging/testing
+            // copyMessageModel.setSubject(messageModel.getSubject() + " (Batch ID: " + uniqueGroupId + ")");
+            copyMessageModel.setSubject(messageModel.getSubject());
             // 3. Re-assign CC/BCC (optional, if you want them in the individual copies)
             copyMessageModel.setCcRecipients(originalCcRecipients);
             copyMessageModel.setBccRecipients(originalBccRecipients);
@@ -106,8 +111,9 @@ public class MailService {
             }
 
 
-            // --- 5. ATTEMPT SEND ---
-            if (trySendEmail(mailRequestCopy)) {
+            // --- 5. ATTEMPT SEND AND RECORD TO DB ---
+            // The trySendEmail method now also saves the record on success
+            if (trySendEmail(mailRequestCopy, recipientEmail, uniqueGroupId)) { // <-- MODIFIED CALL
                 anySuccess = true;
             }
 
@@ -159,26 +165,22 @@ public class MailService {
     /**
      * Attempts to send an email using the preferred protocol, and retries with the
      * alternative protocol if the first attempt fails.
+     *
+     * @param mailRequest The request for the individual recipient.
+     * @param recipientEmail The email address of the recipient.
+     * @param uniqueGroupId The batch ID.
      */
-    public boolean trySendEmail(MailRequest mailRequest) {
+    public boolean trySendEmail(MailRequest mailRequest, String recipientEmail, String uniqueGroupId) { // <-- MODIFIED SIGNATURE
         boolean isSuccess = false;
         String preferredProtocol = mailRequest.getPreferredProtocol().toUpperCase();
         String fallbackProtocol = preferredProtocol.equals("MSGRAPH") ? "SMTP" : "MSGRAPH";
 
         // --- Prepare contextual logging info ---
-        String recipient = mailRequest.getMessage().getToRecipients().stream()
-                .findFirst()
-                .map(r -> r.getEmailAddress().getAddress())
-                .orElse("UNKNOWN_RECIPIENT");
-
         // Safely extract the batch ID from the full tracking ID
         String fullTrackingId = mailRequest.getTrackingID();
-        String batchId = fullTrackingId != null && fullTrackingId.contains("-")
-                ? fullTrackingId.substring(0, fullTrackingId.indexOf('-'))
-                : "N/A";
 
         // Log the start of the attempt for this specific recipient
-        log.info("--- Attempting send for {} (Batch ID: {}) ---", recipient, batchId);
+        log.info("--- Attempting send for {} (Batch ID: {}) ---", recipientEmail, uniqueGroupId);
 
 
         // --- 1. Attempt with Preferred Protocol ---
@@ -186,13 +188,13 @@ public class MailService {
             case "MSGRAPH":
                 MailResponse graphResponse = sendEmailViaGraph(mailRequest);
                 isSuccess = "SUCCESS".equals(graphResponse.getStatus());
-                log.info("Attempt 1 (MSGRAPH) for {}: Success={}", recipient, isSuccess);
+                log.info("Attempt 1 (MSGRAPH) for {}: Success={}", recipientEmail, isSuccess);
                 break;
             case "SMTP":
                 MailResponse smtpResponse = sendEmailViaSmtp(mailRequest);
                 isSuccess = "SUCCESS".equals(smtpResponse.getStatus());
                 // The SMTP service logs its own success message, so we only need the generic attempt status here.
-                log.info("Attempt 1 (SMTP) for {}: Success={}", recipient, isSuccess);
+                log.info("Attempt 1 (SMTP) for {}: Success={}", recipientEmail, isSuccess);
                 break;
             default:
                 log.warn("Unknown preferred protocol: {}. Defaulting to MSGRAPH for attempt 1.", preferredProtocol);
@@ -203,26 +205,31 @@ public class MailService {
 
         // --- 2. Retry with Fallback Protocol if needed ---
         if (!isSuccess) {
-            log.warn("Attempt 1 failed for {}. Retrying with fallback protocol: {}", recipient, fallbackProtocol);
+            log.warn("Attempt 1 failed for {}. Retrying with fallback protocol: {}", recipientEmail, fallbackProtocol);
 
             switch (fallbackProtocol) {
                 case "MSGRAPH":
                     MailResponse graphFallbackResponse = sendEmailViaGraph(mailRequest);
                     isSuccess = "SUCCESS".equals(graphFallbackResponse.getStatus());
-                    log.info("Attempt 2 (MSGRAPH) for {}: Success={}", recipient, isSuccess);
+                    log.info("Attempt 2 (MSGRAPH) for {}: Success={}", recipientEmail, isSuccess);
                     break;
                 case "SMTP":
                     MailResponse smtpFallbackResponse = sendEmailViaSmtp(mailRequest);
                     isSuccess = "SUCCESS".equals(smtpFallbackResponse.getStatus());
                     // The SMTP service logs its own success message, so we only need the generic attempt status here.
-                    log.info("Attempt 2 (SMTP) for {}: Success={}", recipient, isSuccess);
+                    log.info("Attempt 2 (SMTP) for {}: Success={}", recipientEmail, isSuccess);
                     break;
                 // No default case needed here since fallbackProtocol is always one of the two
             }
         }
 
+        // --- 3. CRITICAL: RECORD SUCCESS IN DB ---
+        if (isSuccess && fullTrackingId != null) {
+            emailTrackingService.saveSentEmail(fullTrackingId, recipientEmail, uniqueGroupId, LocalDateTime.now());
+        }
+
         // Log final outcome of this specific recipient's transmission attempt
-        log.info("--- Transmission complete for {} (Success: {}) ---", recipient, isSuccess);
+        log.info("--- Transmission complete for {} (Success: {}) ---", recipientEmail, isSuccess);
 
 
         return isSuccess;

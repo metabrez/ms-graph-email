@@ -2,17 +2,17 @@
 azure:
   activedirectory:
     # Your Azure AD Application (client) ID
-    client-id:  asda
+    client-id:  adfa
 
     # Your Azure AD Tenant (directory) ID
-    tenant-id: aada
+    tenant-id: asdfa
 
     # Your Azure AD Client Secret Value (copied immediately after creation)
-    client-secret: asddf
+    client-secret: 0adasd
 
 # Application-specific configuration
 graph:
-  sender-email: asdf # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
+  sender-email: test@example.com # IMPORTANT: Replace with the actual email address of the mailbox you want to send from
   tracking-base-url: http://localhost:8080
 
 
@@ -22,8 +22,8 @@ spring:
   mail:
     host: smtp.office365.com # e.g., smtp.office365.com, smtp.gmail.com
     port: 587 # or 465 for SSL/TLS
-    username: asdf # The sender's email address
-    password: asdf # The sender's app-specific password or regular password
+    username: test@example.com # The sender's email address
+    password: aadasdasdfa # The sender's app-specific password or regular password
     properties:
       mail:
         smtp:
@@ -33,3 +33,18 @@ spring:
           connectiontimeout: 5000 # 5 seconds
           timeout: 10000
           writetimeout: 10000
+
+  # --- NEW: MySQL JPA Configuration ---
+  datasource:
+    url: jdbc:mysql://localhost:3306/email?createDatabaseIfNotExist=true # REPLACE with your DB URL
+    username: username
+    password: password
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update # Automatically creates/updates the table schema (Great for dev, change to validate in prod)
+    show-sql: false # Set to true to see executed SQL queries
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.MySQLDialect
