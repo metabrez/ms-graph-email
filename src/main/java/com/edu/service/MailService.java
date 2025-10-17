@@ -10,7 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
-import java.time.LocalDateTime; // NEW IMPORT
+import java.time.LocalDateTime;
 import java.util.UUID;
 import java.util.List;
 import java.util.Arrays;
@@ -32,7 +32,7 @@ public class MailService {
     private String trackingBaseUrl;
 
     // Constructor injection for all services
-    public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService, EmailTrackingService emailTrackingService) { // <-- MODIFIED
+    public MailService(GraphServiceClient graphServiceClient, SmtpMailService smtpMailService, EmailTrackingService emailTrackingService) { // <-- MODIFIED SIGNATURE
         this.graphServiceClient = graphServiceClient;
         this.smtpMailService = smtpMailService;
         this.emailTrackingService = emailTrackingService; // <-- INJECTED
@@ -90,9 +90,7 @@ public class MailService {
             // --- Set Subject and Recipients ---
             // 1. Set the individual as the ONLY ToRecipients
             copyMessageModel.setToRecipients(Arrays.asList(individualRecipient));
-            // 2. Append the group ID to the subject
-            // NOTE: Subject modification should ideally only be for debugging/testing
-            // copyMessageModel.setSubject(messageModel.getSubject() + " (Batch ID: " + uniqueGroupId + ")");
+            // 2. Do not append the group ID to the subject (as per typical practice)
             copyMessageModel.setSubject(messageModel.getSubject());
             // 3. Re-assign CC/BCC (optional, if you want them in the individual copies)
             copyMessageModel.setCcRecipients(originalCcRecipients);
@@ -113,7 +111,7 @@ public class MailService {
 
             // --- 5. ATTEMPT SEND AND RECORD TO DB ---
             // The trySendEmail method now also saves the record on success
-            if (trySendEmail(mailRequestCopy, recipientEmail, uniqueGroupId)) { // <-- MODIFIED CALL
+            if (trySendEmail(mailRequestCopy, recipientEmail, uniqueGroupId)) { // <-- UPDATED CALL
                 anySuccess = true;
             }
 
@@ -152,7 +150,7 @@ public class MailService {
             return originalBody;
         }
 
-        // Construct the tracking pixel URL pointing to the new controller endpoint
+        // Construct the tracking pixel URL pointing to the new filter endpoint
         String pixelUrl = String.format("%s/api/mail/track/%s.gif", baseUrl, trackingId);
 
         // Create the invisible HTML image tag, using highly optimized inline CSS to prevent visibility
@@ -170,13 +168,11 @@ public class MailService {
      * @param recipientEmail The email address of the recipient.
      * @param uniqueGroupId The batch ID.
      */
-    public boolean trySendEmail(MailRequest mailRequest, String recipientEmail, String uniqueGroupId) { // <-- MODIFIED SIGNATURE
+    public boolean trySendEmail(MailRequest mailRequest, String recipientEmail, String uniqueGroupId) { // <-- UPDATED SIGNATURE
         boolean isSuccess = false;
         String preferredProtocol = mailRequest.getPreferredProtocol().toUpperCase();
         String fallbackProtocol = preferredProtocol.equals("MSGRAPH") ? "SMTP" : "MSGRAPH";
 
-        // --- Prepare contextual logging info ---
-        // Safely extract the batch ID from the full tracking ID
         String fullTrackingId = mailRequest.getTrackingID();
 
         // Log the start of the attempt for this specific recipient
@@ -225,6 +221,7 @@ public class MailService {
 
         // --- 3. CRITICAL: RECORD SUCCESS IN DB ---
         if (isSuccess && fullTrackingId != null) {
+            // Save the initial tracking record to the database
             emailTrackingService.saveSentEmail(fullTrackingId, recipientEmail, uniqueGroupId, LocalDateTime.now());
         }
 
@@ -234,8 +231,6 @@ public class MailService {
 
         return isSuccess;
     }
-
-    // ... (Helper methods for Graph/SMTP remain below) ...
 
     /**
      * Helper method to convert our MailRequest structure to MS Graph SDK structure
