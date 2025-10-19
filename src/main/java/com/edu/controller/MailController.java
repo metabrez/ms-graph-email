@@ -100,7 +100,7 @@ public class MailController {
      * @param trackingId The unique ID embedded in the email for tracking.
      * @return A tiny 1x1 transparent GIF image.
      */
-   /* @GetMapping("/track/{trackingId}.gif")
+   @GetMapping("/track/{trackingId}.gif")
     public ResponseEntity<byte[]> trackMailOpen(@PathVariable String trackingId) {
         // Log the event, which indicates the email was opened and images were loaded.
         log.info("Email successfully opened/read. Tracking ID: {}", trackingId);
@@ -121,7 +121,8 @@ public class MailController {
 
         // Return the transparent GIF byte array
         return new ResponseEntity<>(TRACKING_PIXEL_GIF, headers, HttpStatus.OK);
-    }*/
+    }
+    
     @GetMapping
     public String hello(){
         return "Hello World";

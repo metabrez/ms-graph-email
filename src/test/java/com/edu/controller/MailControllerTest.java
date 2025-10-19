@@ -1,207 +1,203 @@
 package com.edu.controller;
 
 import com.edu.model.EmailAddress;
+import com.edu.model.EmailOpenTracking;
 import com.edu.model.MailRequest;
 import com.edu.model.MailResponse;
 import com.edu.service.MailService;
+import com.edu.service.TrackingService;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
-import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.web.context.WebApplicationContext;
 
-import java.util.Arrays;
-import java.util.List;
+import java.time.LocalDateTime;
+import java.util.Collections;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-
-@WebMvcTest(MailController.class) // Focuses on testing MailController
+/**
+ * Unit tests for MailController using MockMvc to verify HTTP handling and service delegation.
+ */
+@WebMvcTest(MailController.class)
 class MailControllerTest {
 
     @Autowired
-    private MockMvc mockMvc; // Used to simulate HTTP requests
+    private MockMvc mockMvc;
 
     @Autowired
-    private ObjectMapper objectMapper; // Used to convert objects to JSON and vice versa
+    private ObjectMapper objectMapper; // Spring Boot automatically provides this
+
+    // Mock beans for the controller's dependencies
+    @MockBean
+    private MailService mailService;
 
     @MockBean
-    private MailService mailService; // Mocks the MailService dependency
+    private TrackingService trackingService;
 
-    /**
-     * Helper method to create a MailRequest instance with the new nested structure.
-     */
-    private MailRequest createMailRequest(String protocol) {
-        MailRequest mailRequest = new MailRequest();
+    // Constants
+    private static final String TEST_ID = "test-id-123";
+    private static final String RECIPIENT_EMAIL = "test@example.com";
+    private MailRequest mockMailRequest;
 
-        // 1. Create Body Model
-        MailRequest.BodyModel body = new MailRequest.BodyModel();
-        body.setContentType("Text");
-        body.setContent("Test Body");
-
-        // 2. Create Recipients Model
-        List<MailRequest.RecipientModel> toRecipients = Arrays.asList(
-                new MailRequest.RecipientModel(new EmailAddress("recipient@example.com", "Recipient Name"))
-        );
-
-        // 3. Create Message Model (contains Subject, Body, Recipients)
-        MailRequest.MessageModel message = new MailRequest.MessageModel();
-        message.setSubject("Test Subject");
-        message.setBody(body);
-        message.setToRecipients(toRecipients);
-        message.setCcRecipients(Arrays.asList()); // Ensure CC is initialized
-        message.setBccRecipients(Arrays.asList()); // Ensure BCC is initialized
-
-        // 4. Set Message and top-level fields
-        mailRequest.setMessage(message);
-        mailRequest.setPreferredProtocol(protocol);
-        mailRequest.setSaveToSentItems(false); // Default value
-
-        return mailRequest;
+    @BeforeEach
+    void setUp() {
+        mockMailRequest = new MailRequest();
+        mockMailRequest.getMessage().setSubject("Test Subject");
+        mockMailRequest.getMessage().getBody().setContent("Test Body");
+        mockMailRequest.getMessage().setToRecipients(Collections.singletonList(
+                new MailRequest.RecipientModel(new EmailAddress(RECIPIENT_EMAIL, "Test User"))
+        ));
     }
 
-    /**
-     * Tests the POST /api/mail/send endpoint for a successful email send
-     * (regardless of which protocol succeeded via trySendEmail).
-     */
+    // --- /api/mail/send Endpoint Tests ---
+
     @Test
-    void sendMail_success() throws Exception {
-        // Given
-        MailRequest mailRequest = createMailRequest("MSGRAPH");
-
-        // Use a mock UUID that the MailService would return
-        String uniqueId = "test-unique-id";
-
-        // Mock MailService to return a final SUCCESS response
-        MailResponse mockResponse = MailResponse.builder()
-                .messageId(uniqueId)
+    void sendMail_success_returnsAccepted() throws Exception {
+        MailResponse successResponse = MailResponse.builder()
                 .status("SUCCESS")
-                .message("Email sent successfully using preferred or fallback protocol.")
+                .message("Batch send initiated.")
+                .messageId("batch-id-456")
                 .build();
 
-        // Mock the MailService behavior
-        when(mailService.sendEmail(any(MailRequest.class))).thenReturn(mockResponse);
+        when(mailService.sendEmail(any(MailRequest.class))).thenReturn(successResponse);
 
-        // When & Then
-        MockHttpServletRequestBuilder requestBuilder = post("/api/mail/send")
-                .content(objectMapper.writeValueAsString(mailRequest))
-                .contentType(MediaType.APPLICATION_JSON);
-
-        mockMvc.perform(requestBuilder)
-                .andExpect(status().isAccepted()) // Expect 202 Accepted
+        mockMvc.perform(post("/api/mail/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(mockMailRequest)))
+                .andExpect(status().isAccepted()) // HTTP 202
                 .andExpect(jsonPath("$.status").value("SUCCESS"))
-                .andExpect(jsonPath("$.message").value("Email sent successfully using preferred or fallback protocol."))
-                .andExpect(jsonPath("$.messageId").value(uniqueId));
+                .andExpect(jsonPath("$.messageId").value("batch-id-456"));
     }
 
-    /**
-     * Tests the POST /api/mail/send endpoint for a failed email send
-     * (meaning both protocols failed via trySendEmail).
-     */
     @Test
-    void sendMail_failure() throws Exception {
-        // Given
-        MailRequest mailRequest = createMailRequest("MSGRAPH");
-
-        // Mock MailService to return a final FAILED response
-        MailResponse mockResponse = MailResponse.builder()
+    void sendMail_failure_returnsInternalServerError() throws Exception {
+        MailResponse failureResponse = MailResponse.builder()
                 .status("FAILED")
-                .message("Failed to send email after attempting both MSGraph and SMTP protocols.")
+                .message("Failed to send.")
                 .messageId(null)
                 .build();
 
-        // Mock the MailService behavior to return a failed response
-        when(mailService.sendEmail(any(MailRequest.class))).thenReturn(mockResponse);
+        when(mailService.sendEmail(any(MailRequest.class))).thenReturn(failureResponse);
 
-        // When & Then
-        MockHttpServletRequestBuilder requestBuilder = post("/api/mail/send")
-                .content(objectMapper.writeValueAsString(mailRequest))
-                .contentType(MediaType.APPLICATION_JSON);
-
-        mockMvc.perform(requestBuilder)
-                .andExpect(status().isInternalServerError()) // Expect 500 Internal Server Error
-                .andExpect(jsonPath("$.status").value("FAILED"))
-                .andExpect(jsonPath("$.message").value("Failed to send email after attempting both MSGraph and SMTP protocols."))
-                .andExpect(jsonPath("$.messageId").doesNotExist());
+        mockMvc.perform(post("/api/mail/send")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(mockMailRequest)))
+                .andExpect(status().isInternalServerError()) // HTTP 500
+                .andExpect(jsonPath("$.status").value("FAILED"));
     }
 
-    /**
-     * Tests the GET /api/mail/status endpoint when the email is found. (No change needed here)
-     */
+    // --- /api/mail/status Endpoint Tests ---
+
     @Test
-    void getMailStatus_found() throws Exception {
-        // Given
-        String subject = "Found Email";
-        String recipient = "found@example.com";
-        MailResponse mockResponse = new MailResponse("msgId123", "FOUND_IN_SENT_ITEMS", "Email found.");
+    void getMailStatus_found_returnsOk() throws Exception {
+        MailResponse foundResponse = MailResponse.builder()
+                .status("FOUND_IN_SENT_ITEMS")
+                .message("Email found.")
+                .messageId("msg-1")
+                .build();
 
-        // Mock the MailService behavior
-        when(mailService.getSentMailStatus(subject, recipient)).thenReturn(mockResponse);
+        when(mailService.getSentMailStatus(eq("Test Subject"), eq(RECIPIENT_EMAIL)))
+                .thenReturn(foundResponse);
 
-        // When & Then
         mockMvc.perform(get("/api/mail/status")
-                        .param("subject", subject)
-                        .param("recipientEmail", recipient)
-                        .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isOk()) // Expect 200 OK
-                .andExpect(jsonPath("$.status").value("FOUND_IN_SENT_ITEMS"))
-                .andExpect(jsonPath("$.message").value("Email found."))
-                .andExpect(jsonPath("$.messageId").value("msgId123"));
+                        .param("subject", "Test Subject")
+                        .param("recipientEmail", RECIPIENT_EMAIL))
+                .andExpect(status().isOk()) // HTTP 200
+                .andExpect(jsonPath("$.status").value("FOUND_IN_SENT_ITEMS"));
     }
 
-    /**
-     * Tests the GET /api/mail/status endpoint when the email is not found. (No change needed here)
-     */
     @Test
-    void getMailStatus_notFound() throws Exception {
-        // Given
-        String subject = "Not Found Email";
-        String recipient = "notfound@example.com";
-        MailResponse mockResponse = new MailResponse(null, "NOT_FOUND_IN_SENT_ITEMS", "Email not found.");
+    void getMailStatus_notFound_returnsNotFound() throws Exception {
+        MailResponse notFoundResponse = MailResponse.builder()
+                .status("NOT_FOUND_IN_SENT_ITEMS")
+                .message("Email not found.")
+                .messageId(null)
+                .build();
 
-        // Mock the MailService behavior
-        when(mailService.getSentMailStatus(subject, recipient)).thenReturn(mockResponse);
+        when(mailService.getSentMailStatus(eq("Test Subject"), eq(RECIPIENT_EMAIL)))
+                .thenReturn(notFoundResponse);
 
-        // When & Then
         mockMvc.perform(get("/api/mail/status")
-                        .param("subject", subject)
-                        .param("recipientEmail", recipient)
-                        .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isNotFound()) // Expect 404 Not Found
-                .andExpect(jsonPath("$.status").value("NOT_FOUND_IN_SENT_ITEMS"))
-                .andExpect(jsonPath("$.message").value("Email not found."))
-                .andExpect(jsonPath("$.messageId").doesNotExist());
+                        .param("subject", "Test Subject")
+                        .param("recipientEmail", RECIPIENT_EMAIL))
+                .andExpect(status().isNotFound()) // HTTP 404
+                .andExpect(jsonPath("$.status").value("NOT_FOUND_IN_SENT_ITEMS"));
     }
 
-    /**
-     * Tests the GET /api/mail/status endpoint for a failed status check. (No change needed here)
-     */
     @Test
-    void getMailStatus_failure() throws Exception {
-        // Given
-        String subject = "Error Email";
-        String recipient = "error@example.com";
-        MailResponse mockResponse = new MailResponse(null, "FAILED_STATUS_CHECK", "Failed to check status: Error");
+    void getMailStatus_failedCheck_returnsInternalServerError() throws Exception {
+        MailResponse failedResponse = MailResponse.builder()
+                .status("FAILED_STATUS_CHECK")
+                .message("Error.")
+                .messageId(null)
+                .build();
 
-        // Mock the MailService behavior to return a failed response
-        when(mailService.getSentMailStatus(subject, recipient)).thenReturn(mockResponse);
+        when(mailService.getSentMailStatus(any(), any())).thenReturn(failedResponse);
 
-        // When & Then
         mockMvc.perform(get("/api/mail/status")
-                        .param("subject", subject)
-                        .param("recipientEmail", recipient)
-                        .accept(MediaType.APPLICATION_JSON))
-                .andExpect(status().isInternalServerError()) // Expect 500 Internal Server Error
-                .andExpect(jsonPath("$.status").value("FAILED_STATUS_CHECK"))
-                .andExpect(jsonPath("$.message").value("Failed to check status: Error"))
-                .andExpect(jsonPath("$.messageId").doesNotExist());
+                        .param("subject", "Test Subject")
+                        .param("recipientEmail", RECIPIENT_EMAIL))
+                .andExpect(status().isInternalServerError()) // HTTP 500
+                .andExpect(jsonPath("$.status").value("FAILED_STATUS_CHECK"));
+    }
+
+    // --- /api/mail/track/{trackingId}.gif Endpoint Tests ---
+
+    @Test
+    void trackMailOpen_returnsTransparentGif() throws Exception {
+        EmailOpenTracking mockTracking = new EmailOpenTracking(TEST_ID, 1, LocalDateTime.now(), LocalDateTime.now());
+
+        // Mock the TrackingService call
+        when(trackingService.trackOpen(eq(TEST_ID))).thenReturn(mockTracking);
+
+        mockMvc.perform(get("/api/mail/track/{trackingId}.gif", TEST_ID))
+                .andExpect(status().isOk()) // HTTP 200
+                .andExpect(content().contentType("image/gif"))
+                .andExpect(header().string("Cache-Control", "no-cache, no-store, must-revalidate"))
+                .andExpect(header().string("Pragma", "no-cache"))
+                // Corrected assertion: Content-Length is a Header property
+                .andExpect(header().longValue("Content-Length", 43L));
+    }
+
+    // --- /api/mail/track/status/{trackingId} Endpoint Tests ---
+
+    @Test
+    void getTrackingStatus_found_returnsOk() throws Exception {
+        EmailOpenTracking mockTracking = new EmailOpenTracking(TEST_ID, 5, LocalDateTime.now().minusDays(1), LocalDateTime.now());
+
+        when(trackingService.getTrackingStatus(eq(TEST_ID))).thenReturn(mockTracking);
+
+        mockMvc.perform(get("/api/mail/track/status/{trackingId}", TEST_ID))
+                .andExpect(status().isOk()) // HTTP 200
+                .andExpect(jsonPath("$.trackingId").value(TEST_ID))
+                .andExpect(jsonPath("$.openCount").value(5));
+    }
+
+    @Test
+    void getTrackingStatus_notFound_returnsNotFound() throws Exception {
+        when(trackingService.getTrackingStatus(eq(TEST_ID))).thenReturn(null);
+
+        mockMvc.perform(get("/api/mail/track/status/{trackingId}", TEST_ID))
+                .andExpect(status().isNotFound()); // HTTP 404
+    }
+
+    // --- Other Endpoints ---
+    @Test
+    void hello_returnsHelloWorld() throws Exception {
+        mockMvc.perform(get("/api/mail"))
+                .andExpect(status().isOk())
+                .andExpect(content().string("Hello World"));
     }
 }

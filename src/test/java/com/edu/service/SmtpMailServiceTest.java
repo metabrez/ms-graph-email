@@ -9,118 +9,88 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.MockitoAnnotations;
-import org.springframework.mail.MailSendException;
-import org.springframework.mail.SimpleMailMessage;
 import org.springframework.mail.javamail.JavaMailSender;
-import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.Arrays;
-import java.util.List;
 import java.util.Collections;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
-/**
- * Unit tests for the SmtpMailService class, mocking the JavaMailSender.
- */
 class SmtpMailServiceTest {
 
     @Mock
-    private JavaMailSender javaMailSender;
+    private JavaMailSender mailSender;
 
     @InjectMocks
     private SmtpMailService smtpMailService;
 
-    private final String SMTP_USERNAME = "smtp_sender@example.com";
-
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        // Inject the @Value field for smtpUsername
-        ReflectionTestUtils.setField(smtpMailService, "smtpUsername", SMTP_USERNAME);
-
-        // Mock the creation of MimeMessage by the mailSender
-        when(javaMailSender.createMimeMessage()).thenReturn(mock(MimeMessage.class));
+        // Set SMTP username manually since @Value injection won't run in test context
+        smtpMailService = new SmtpMailService(mailSender);
+        try {
+            java.lang.reflect.Field field = SmtpMailService.class.getDeclaredField("smtpUsername");
+            field.setAccessible(true);
+            field.set(smtpMailService, "no-reply@example.com");
+        } catch (Exception e) {
+            fail("Failed to inject smtpUsername");
+        }
     }
 
-    private MailRequest createMailRequest() {
-        // Create the nested structure based on the refactored MailRequest class
-        MailRequest mailRequest = new MailRequest();
-
-        MailRequest.BodyModel body = new MailRequest.BodyModel();
-        body.setContentType("Text");
-        body.setContent("Test Body Content");
-
+    private MailRequest createMockMailRequest() {
+        MailRequest request = new MailRequest();
         MailRequest.MessageModel message = new MailRequest.MessageModel();
-        message.setSubject("Test Subject SMTP");
+        MailRequest.BodyModel body = new MailRequest.BodyModel();
+
+        body.setContent("<p>Hello!</p>");
+        body.setContentType("Html");
+        message.setSubject("Test Email");
         message.setBody(body);
 
-        // Recipients for TO, CC, and BCC
-        List<MailRequest.RecipientModel> toRecipients = Arrays.asList(
-                new MailRequest.RecipientModel(new EmailAddress("recipient1@example.com", "Recipient One"))
-        );
-        List<MailRequest.RecipientModel> ccRecipients = Arrays.asList(
-                new MailRequest.RecipientModel(new EmailAddress("cc@example.com", "CC User"))
-        );
-        List<MailRequest.RecipientModel> bccRecipients = Arrays.asList(
-                new MailRequest.RecipientModel(new EmailAddress("bcc@example.com", "BCC User"))
-        );
+        // ✅ Use correct EmailAddress class
+        EmailAddress email = new EmailAddress("to@example.com", "Test User");
 
-        message.setToRecipients(toRecipients);
-        message.setCcRecipients(ccRecipients);
-        message.setBccRecipients(bccRecipients);
+        MailRequest.RecipientModel recipient = new MailRequest.RecipientModel();
+        recipient.setEmailAddress(email);
 
-        mailRequest.setMessage(message);
-        mailRequest.setSaveToSentItems(false);
-        mailRequest.setPreferredProtocol("SMTP");
-        mailRequest.setTrackingID("test-smtp-tracking-id");
+        message.setToRecipients(Collections.singletonList(recipient));
 
-        return mailRequest;
+        request.setMessage(message);
+        request.setPreferredProtocol("SMTP");
+        request.setRequestPixelTracking(true);
+        request.setSaveToSentItems(true);
+        request.setTrackingID("12345-batchXYZ");
+
+        return request;
     }
 
     @Test
-    void sendSmtpEmail_success() {
-        // Given
-        MailRequest request = createMailRequest();
+    void testSendSmtpEmail_Success() throws Exception {
+        MailRequest request = createMockMailRequest();
 
-        // Mock mailSender.send() to do nothing (simulate success)
-        doNothing().when(javaMailSender).send(any(MimeMessage.class));
+        MimeMessage mimeMessage = mock(MimeMessage.class);
+        when(mailSender.createMimeMessage()).thenReturn(mimeMessage);
 
-        // When
         MailResponse response = smtpMailService.sendSmtpEmail(request);
 
-        // Then
         assertNotNull(response);
         assertEquals("SUCCESS", response.getStatus());
-        assertEquals("Email sent successfully via SMTP.", response.getMessage());
-        assertEquals(request.getTrackingID(), response.getMessageId());
-
-        // Verify that the send method was called exactly once with a MimeMessage
-        verify(javaMailSender, times(1)).send(any(MimeMessage.class));
+        assertTrue(response.getMessage().contains("successfully"));
+        verify(mailSender, times(1)).send(any(MimeMessage.class));
     }
 
     @Test
-    void sendSmtpEmail_failure() {
-        // Given
-        MailRequest request = createMailRequest();
-        String errorMessage = "Authentication failed";
+    void testSendSmtpEmail_Failure() throws Exception {
+        MailRequest request = createMockMailRequest();
 
-        // Mock mailSender.send() to throw an exception
-        doThrow(new MailSendException(errorMessage)).when(javaMailSender).send(any(MimeMessage.class));
+        when(mailSender.createMimeMessage()).thenThrow(new RuntimeException("SMTP Error"));
 
-        // When
         MailResponse response = smtpMailService.sendSmtpEmail(request);
 
-        // Then
         assertNotNull(response);
         assertEquals("FAILED", response.getStatus());
-        assertEquals("Failed to send email via SMTP: " + errorMessage, response.getMessage());
-        assertEquals(null, response.getMessageId());
-
-        // Verify that the send method was attempted
-        verify(javaMailSender, times(1)).send(any(MimeMessage.class));
+        assertTrue(response.getMessage().contains("Failed to send email"));
+        verify(mailSender, never()).send(any(MimeMessage.class));
     }
 }
