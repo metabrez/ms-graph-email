@@ -110,15 +110,15 @@ public class MailController {
            ipAddress = request.getRemoteAddr();
        }
        String userAgent = request.getHeader("User-Agent");
-       // CRITICAL: Record the open event and retrieve the tracking data, passing client details
-       // NOTE: The controller uses the in-memory TrackingService. You may need to update this to use EmailTrackingService if using the JPA entity.
-      // EmailOpenTracking tracking = trackingService.trackOpen(trackingId, ipAddress, userAgent); // <-- UPDATED CALL
        Optional<EmailTrackingEntity> tracking = trackingService.trackOpen(trackingId, ipAddress, userAgent);
 
-       // --- UPDATED LOG LINE ---
-       log.info("Email successfully opened/read. Tracking ID: {}, Total Opens: {}, IP: {}, Agent: {}",
-               trackingId, tracking.get().getOpenCount(), ipAddress, userAgent);
-
+       // --- FIX: Check Optional before logging/accessing data ---
+       if (tracking.isPresent()) {
+           log.info("Email successfully opened/read. Tracking ID: {}, Total Opens: {}, IP: {}, Agent: {}",
+                   trackingId, tracking.get().getOpenCount(), ipAddress, userAgent);
+       } else {
+           log.warn("Tracking pixel hit for unknown ID: {}. IP: {}, Agent: {}", trackingId, ipAddress, userAgent);
+       }
         // Build headers for the image response
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.valueOf("image/gif"));

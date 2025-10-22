@@ -149,22 +149,22 @@ public class MailControllerTest {
 
     @Test
     void getMailStatus_InternalServerError() throws Exception {
-        // This test covers the final 'else' block (around line 80) in MailController.java
-        MailResponse failedResponse = MailResponse.builder()
-                .status("FAILED_STATUS_CHECK") // A status that isn't OK or NOT_FOUND
+        // Mock a response status that triggers the final 'else' block (500 Internal Server Error)
+        MailResponse errorResponse = MailResponse.builder()
+                .status("FAILED_STATUS_CHECK")
                 .message("Error checking mail status.")
                 .messageId(null)
                 .build();
 
-        when(mailService.getSentMailStatus(anyString(), anyString())).thenReturn(failedResponse);
+        when(mailService.getSentMailStatus(anyString(), anyString())).thenReturn(errorResponse);
 
         mockMvc.perform(get("/api/mail/status")
-                        .param("subject", "Test Subject")
-                        .param("recipientEmail", "test@example.com"))
+                        .param("subject", "Error Subject")
+                        .param("recipientEmail", "error@example.com"))
                 .andExpect(status().isInternalServerError()) // Expect 500 Internal Server Error
                 .andExpect(jsonPath("$.status").value("FAILED_STATUS_CHECK"));
 
-        verify(mailService, times(1)).getSentMailStatus(eq("Test Subject"), eq("test@example.com"));
+        verify(mailService, times(1)).getSentMailStatus(eq("Error Subject"), eq("error@example.com"));
     }
 
     // --- TEST SUITE: /api/mail/track/{trackingId}.gif ---
@@ -178,20 +178,18 @@ public class MailControllerTest {
         when(trackingService.trackOpen(eq(MOCK_TRACKING_ID), anyString(), anyString()))
                 .thenReturn(Optional.of(mockEntity));
 
-        // Note: The controller manually extracts IP and User-Agent from HttpServletRequest.
-        // MockMvc handles this by default.
-
-        ResultActions result = mockMvc.perform(get("/api/mail/track/{trackingId}.gif", MOCK_TRACKING_ID)
+        // Test with X-FORWARDED-FOR header (which should be prioritized)
+        mockMvc.perform(get("/api/mail/track/{trackingId}.gif", MOCK_TRACKING_ID)
                         .header("User-Agent", "Test-Agent-String")
                         .header("X-FORWARDED-FOR", "192.168.1.1"))
                 .andExpect(status().isOk()) // Expect 200 OK
                 .andExpect(content().contentType("image/gif"))
-                .andExpect(header().string("Content-Length", "43")); // The size of the transparent GIF byte array
+                .andExpect(header().string("Content-Length", "43"));
 
-        // Verify that the tracking service was called with the correct ID and non-null client details
+        // Verify tracking service was called with the X-FORWARDED-FOR IP
         verify(trackingService, times(1)).trackOpen(
                 eq(MOCK_TRACKING_ID),
-                eq("192.168.1.1"), // from X-FORWARDED-FOR header
+                eq("192.168.1.1"),
                 eq("Test-Agent-String")
         );
     }
@@ -204,11 +202,11 @@ public class MailControllerTest {
         when(trackingService.trackOpen(anyString(), anyString(), anyString()))
                 .thenReturn(Optional.of(mockEntity));
 
-        // FIX: Manually setting the remote address via a post-processor lambda, as 'withRemoteAddr' fails to resolve.
+        // Use a lambda to set the remote address manually as 'withRemoteAddr' often fails to resolve
         final String remoteIp = "10.0.0.5";
 
         mockMvc.perform(get("/api/mail/track/{trackingId}.gif", MOCK_TRACKING_ID)
-                        // Use a lambda to set the remote address directly on the MockHttpServletRequest
+                        // This PostProcessor manually sets the remote IP for the request
                         .with(request -> {
                             request.setRemoteAddr(remoteIp);
                             return request;
@@ -219,7 +217,7 @@ public class MailControllerTest {
         // Verify that the tracking service was called with the remote IP address
         verify(trackingService, times(1)).trackOpen(
                 eq(MOCK_TRACKING_ID),
-                eq(remoteIp),
+                eq(remoteIp), // IP from setRemoteAddr()
                 eq("Test-Agent")
         );
     }
@@ -232,43 +230,41 @@ public class MailControllerTest {
         when(trackingService.trackOpen(anyString(), anyString(), anyString()))
                 .thenReturn(Optional.of(mockEntity));
 
-        final String remoteIp = "10.0.0.6";
+        // We specifically check how the IP is extracted when X-FORWARDED-FOR is "unknown"
+        final String remoteIp = "10.0.0.5";
 
-        // This test covers the line 93 logic: if X-FORWARDED-FOR is "unknown", fall back to getRemoteAddr().
         mockMvc.perform(get("/api/mail/track/{trackingId}.gif", MOCK_TRACKING_ID)
-                        .header("X-FORWARDED-FOR", "unknown") // Triggers the fallback logic
                         .with(request -> {
-                            request.setRemoteAddr(remoteIp); // The value getRemoteAddr() returns
+                            request.setRemoteAddr(remoteIp);
                             return request;
                         })
-                        .header("User-Agent", "Test-Agent-Unknown"))
+                        .header("User-Agent", "Test-Agent")
+                        .header("X-FORWARDED-FOR", "unknown")) // Should be ignored in favor of remoteAddr
                 .andExpect(status().isOk());
 
-        // Verify that the tracking service was called with the remote IP address (10.0.0.6)
-        // instead of the 'unknown' value from the header.
+        // Verify that the tracking service was called with the remote IP address
         verify(trackingService, times(1)).trackOpen(
                 eq(MOCK_TRACKING_ID),
-                eq(remoteIp),
-                eq("Test-Agent-Unknown")
+                eq(remoteIp), // IP from setRemoteAddr()
+                eq("Test-Agent")
         );
     }
 
     @Test
-    void trackMailOpen_NotFoundReturnsServerError() throws Exception {
-        // Mock the service to return Optional.empty(), simulating a non-existent tracking ID.
-        when(trackingService.trackOpen(eq("non-existent-id"), anyString(), anyString()))
+    void trackMailOpen_NotFoundReturns200Ok() throws Exception {
+        // Mock service to return an empty Optional (record not found)
+        when(trackingService.trackOpen(anyString(), anyString(), anyString()))
                 .thenReturn(Optional.empty());
 
-        // When the Optional is empty, tracking.get() will crash the controller.
-        // We expect an Internal Server Error (500) if the code is not fixed.
-        // We use a mock IP and User-Agent to ensure the trackOpen method is called.
+        // The controller should handle the empty optional gracefully (fixed bug) and still return a 200 OK
+        // and the GIF, because tracking pixels should never crash the mail client.
         mockMvc.perform(get("/api/mail/track/{trackingId}.gif", "non-existent-id")
                         .header("User-Agent", "Missing-Record-Agent")
                         .header("X-FORWARDED-FOR", "1.1.1.1"))
-                // The current, buggy controller implementation will throw an exception
-                // leading to a 500 status. This test ensures we cover that failure path.
-                .andExpect(status().isInternalServerError());
+                .andExpect(status().isOk()) // Expect 200 OK
+                .andExpect(content().contentType("image/gif"));
 
+        // Verify that the tracking service was still called
         verify(trackingService, times(1)).trackOpen(
                 eq("non-existent-id"),
                 eq("1.1.1.1"),

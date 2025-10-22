@@ -273,6 +273,112 @@ public class MailServiceTest {
     }
 
     @Test
+    void testSendEmailViaGraph_withCcRecipients() throws Exception {
+        MailRequest request = createMailRequest(Arrays.asList(createRecipient(TEST_RECIPIENT_EMAIL, TEST_RECIPIENT_NAME)), "MSGRAPH", false);
+
+        // Add CC recipients
+        List<MailRequest.RecipientModel> ccRecipients = Arrays.asList(
+                createRecipient("cc1@example.com", "CC One"),
+                createRecipient("cc2@example.com", "CC Two")
+        );
+        request.getMessage().setCcRecipients(ccRecipients);
+
+        // Mock Graph success setup
+        mockGraphSendSuccess();
+
+        // Capture the body sent to the Graph API
+        ArgumentCaptor<SendMailPostRequestBody> captor = ArgumentCaptor.forClass(SendMailPostRequestBody.class);
+        doNothing().when(sendMailRequestBuilder).post(captor.capture());
+
+        mailService.sendEmailViaGraph(request);
+
+        // Verify the CC recipient list size in the captured body
+        assertNotNull(captor.getValue().getMessage().getCcRecipients());
+        assertEquals(2, captor.getValue().getMessage().getCcRecipients().size());
+
+        // Verify one of the CC recipients is present
+        assertTrue(captor.getValue().getMessage().getCcRecipients().stream()
+                .anyMatch(r -> r.getEmailAddress().getAddress().equals("cc1@example.com")));
+
+        // Ensure the success status is returned
+        MailResponse response = mailService.sendEmailViaGraph(request);
+        assertEquals("SUCCESS", response.getStatus());
+    }
+
+    @Test
+    void sendEmail_nullRecipientsList_returnsFailedResponse() {
+        // Create a MailRequest but explicitly set the toRecipients list to null
+        MailRequest request = createMailRequest(Collections.emptyList(), "MSGRAPH", false);
+        request.getMessage().setToRecipients(null);
+
+        MailResponse response = mailService.sendEmail(request);
+
+        assertEquals("FAILED", response.getStatus());
+        assertTrue(response.getMessage().contains("No recipients found"));
+        assertNull(response.getMessageId());
+        verifyNoInteractions(emailTrackingService, smtpMailService);
+        verify(graphServiceClient, never()).users();
+    }
+
+    @Test
+    void testSendEmailViaGraph_withBccRecipients() throws Exception {
+        MailRequest request = createMailRequest(Arrays.asList(createRecipient(TEST_RECIPIENT_EMAIL, TEST_RECIPIENT_NAME)), "MSGRAPH", false);
+
+        // Add BCC recipients
+        List<MailRequest.RecipientModel> bccRecipients = Arrays.asList(
+                createRecipient("bcc1@example.com", "BCC One")
+        );
+        request.getMessage().setBccRecipients(bccRecipients);
+
+        // Mock Graph success setup
+        mockGraphSendSuccess();
+
+        // Capture the body sent to the Graph API
+        ArgumentCaptor<SendMailPostRequestBody> captor = ArgumentCaptor.forClass(SendMailPostRequestBody.class);
+        doNothing().when(sendMailRequestBuilder).post(captor.capture());
+
+        mailService.sendEmailViaGraph(request);
+
+        // Verify the BCC recipient list size in the captured body
+        assertNotNull(captor.getValue().getMessage().getBccRecipients());
+        assertEquals(1, captor.getValue().getMessage().getBccRecipients().size());
+
+        // Verify the BCC recipient is present
+        assertEquals("bcc1@example.com", captor.getValue().getMessage().getBccRecipients().get(0).getEmailAddress().getAddress());
+
+        // Ensure the success status is returned
+        MailResponse response = mailService.sendEmailViaGraph(request);
+        assertEquals("SUCCESS", response.getStatus());
+    }
+
+    @Test
+    void sendEmail_pixelTracking_nullBaseUrl_returnsOriginalBody() {
+        // Set the trackingBaseUrl to null using reflection
+        ReflectionTestUtils.setField(mailService, "trackingBaseUrl", null);
+
+        MailRequest.RecipientModel recipient = createRecipient("nullbase@example.com", "Null Base User");
+        MailRequest request = createMailRequest(Arrays.asList(recipient), "SMTP", true);
+
+        // Mock SMTP success (The content shouldn't change, so SMTP should still succeed)
+        when(smtpMailService.sendSmtpEmail(any(MailRequest.class))).thenAnswer(invocation -> {
+            MailRequest mailRequestCopy = invocation.getArgument(0);
+            String content = mailRequestCopy.getMessage().getBody().getContent();
+
+            // CRITICAL ASSERTION: Content MUST be the original content only.
+            assertEquals(TEST_BODY_CONTENT, content, "Content should be original body, pixel injection should fail gracefully.");
+
+            return MailResponse.builder().status("SUCCESS").message("Sent").build();
+        });
+
+        mailService.sendEmail(request);
+
+        // Verifying the original body assertion is enough to cover the log.warn and return.
+        verify(smtpMailService, times(1)).sendSmtpEmail(any(MailRequest.class));
+        verify(emailTrackingService, times(1)).saveSentEmail(anyString(), eq("nullbase@example.com"), anyString(), any());
+    }
+    // --- END NEW TEST CASE ---
+
+    @Test
     void sendEmail_withPixelTracking_injectsPixelAndSucceeds() {
         MailRequest.RecipientModel recipient = createRecipient("tracker@example.com", "Tracker");
         MailRequest request = createMailRequest(Arrays.asList(recipient), "SMTP", true); // Use SMTP protocol
