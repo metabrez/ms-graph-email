@@ -33,6 +33,27 @@ public class EmailTrackingEntity {
 
     private LocalDateTime lastOpenTimestamp;
 
+    @Column(length = 50)
+    private String clientIpAddress;
+
+    // We will store the raw User-Agent string
+    @Column(length = 512)
+    private String clientUserAgent;
+
+    // Fields for derived data (e.g., from a User-Agent parser or GeoIP service)
+    @Column(length = 50)
+    private String clientBrowser;
+
+    @Column(length = 50)
+    private String clientDevice;
+
+    // Fields for Geolocation (requires external GeoIP library to populate)
+    @Column(length = 50)
+    private String clientCity;
+
+    @Column(length = 50)
+    private String clientCountry;
+
     // --- Constructors ---
 
     public EmailTrackingEntity() {}
@@ -102,5 +123,43 @@ public class EmailTrackingEntity {
 
     public void setLastOpenTimestamp(LocalDateTime lastOpenTimestamp) {
         this.lastOpenTimestamp = lastOpenTimestamp;
+    }
+
+    public String getClientIpAddress() {
+        return clientIpAddress;
+    }
+    public void setClientIpAddress(String clientIpAddress) {
+        this.clientIpAddress = clientIpAddress;
+    }
+    public String getClientUserAgent() {
+        return clientUserAgent;
+    }
+    public void setClientUserAgent(String clientUserAgent) {
+        this.clientUserAgent = clientUserAgent;
+    }
+    public String getClientBrowser() {
+        return clientBrowser;
+    }
+    public void setClientBrowser(String clientBrowser) {
+        this.clientBrowser = clientBrowser;
+    }
+    public String getClientDevice() {
+        return clientDevice;
+    }
+    public void setClientDevice(String clientDevice) {
+        this.clientDevice = clientDevice;
+
+    }
+    public String getClientCity() {
+        return clientCity;
+    }
+    public void setClientCity(String clientCity) {
+        this.clientCity = clientCity;
+    }
+    public String getClientCountry() {
+        return clientCountry;
+    }
+    public void setClientCountry(String clientCountry) {
+        this.clientCountry = clientCountry;
     }
 }

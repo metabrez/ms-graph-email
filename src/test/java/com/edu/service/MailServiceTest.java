@@ -510,7 +510,7 @@ public class MailServiceTest {
         when(usersRequestBuilder.byUserId(anyString())).thenReturn(userItemRequestBuilder);
         when(userItemRequestBuilder.sendMail()).thenReturn(sendMailRequestBuilder);
         // Mock the void post method to do nothing (simulate success)
-        when(userItemRequestBuilder.messages()).thenReturn(messagesRequestBuilder);
+       // when(userItemRequestBuilder.messages()).thenReturn(messagesRequestBuilder);
        // doNothing().when(sendMailRequestBuilder).post(any(SendMailPostRequestBody.class));
     }
 }

@@ -53,7 +53,7 @@ public class EmailTrackingService {
      * @return The updated tracking information, or null if the record doesn't exist.
      */
     @Transactional
-    public Optional<EmailTrackingEntity> trackOpen(String trackingId) {
+    public Optional<EmailTrackingEntity> trackOpen(String trackingId, String ipAddress, String userAgent) {
         Optional<EmailTrackingEntity> trackingOpt = trackingRepository.findByTrackingId(trackingId);
 
         if (trackingOpt.isPresent()) {
@@ -63,6 +63,22 @@ public class EmailTrackingService {
             if (tracking.getOpenCount() == 0) {
                 // First open
                 tracking.setFirstOpenTimestamp(now);
+
+                // 1. IP Address and Raw User Agent
+                tracking.setClientIpAddress(ipAddress);
+                tracking.setClientUserAgent(userAgent);
+
+                // 2. Parsed Data (Browser/Device) and Geolocation
+                // In a real app, this is where you'd use a parser library (like UAParser)
+                // and a GeoIP service (like MaxMind)
+
+                // NOTE: Using raw userAgent as a temporary placeholder for Browser/Device
+                tracking.setClientBrowser(userAgent != null ? userAgent : "Unknown");
+                tracking.setClientDevice(userAgent != null ? userAgent : "Unknown");
+                tracking.setClientCity("N/A - GeoIP Required");
+                tracking.setClientCountry("N/A - GeoIP Required");
+
+                log.info("First open recorded for ID {}. IP: {}, Agent: {}", trackingId, ipAddress, userAgent);
             }
             // Subsequent open
             tracking.setOpenCount(tracking.getOpenCount() + 1);
