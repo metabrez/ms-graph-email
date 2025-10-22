@@ -3,6 +3,7 @@ package com.edu.service;
 import com.edu.model.EmailTrackingEntity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -17,9 +18,10 @@ import java.util.Optional;
 public class EmailTrackingService {
 
     private static final Logger log = LoggerFactory.getLogger(EmailTrackingService.class);
-    private final com.edu.repository.EmailTrackingRepository trackingRepository;
+    @Autowired
+    private com.edu.repository.EmailTrackingRepository trackingRepository;
 
-    public EmailTrackingService(com.edu.repository.EmailTrackingRepository trackingRepository) {
+    public EmailTrackingService() {
         this.trackingRepository = trackingRepository;
     }
 

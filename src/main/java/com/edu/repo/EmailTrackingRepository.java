@@ -33,4 +33,5 @@ public interface EmailTrackingRepository extends JpaRepository<EmailTrackingEnti
             "e.firstOpenTimestamp = CASE WHEN e.openCount = 0 THEN :timestamp ELSE e.firstOpenTimestamp END " +
             "WHERE e.trackingId = :trackingId")
     int incrementOpenCountAndSetTimestamps(@Param("trackingId") String trackingId, @Param("timestamp") LocalDateTime timestamp);
+
 }

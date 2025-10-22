@@ -67,7 +67,7 @@ class EmailTrackingServiceTest {
         // Mock the saving process (which should return the modified entity)
         when(trackingRepository.save(any(EmailTrackingEntity.class))).thenAnswer(i -> i.getArgument(0));
 
-        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID);
+        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID,"12344","agent");
 
         assertTrue(result.isPresent());
         EmailTrackingEntity updatedEntity = result.get();
@@ -100,7 +100,7 @@ class EmailTrackingServiceTest {
         // CRITICAL FIX: Add a small delay to ensure LocalDateTime.now() in the service is strictly later
         Thread.sleep(5);
 
-        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID);
+        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID, "12344","agent");
 
         assertTrue(result.isPresent());
         EmailTrackingEntity updatedEntity = result.get();
@@ -122,7 +122,7 @@ class EmailTrackingServiceTest {
         // Mock repository returning empty Optional
         when(trackingRepository.findByTrackingId(TEST_ID)).thenReturn(Optional.empty());
 
-        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID);
+        Optional<EmailTrackingEntity> result = emailTrackingService.trackOpen(TEST_ID,"12344","agent");
 
         assertFalse(result.isPresent());
         // Verify save was not called

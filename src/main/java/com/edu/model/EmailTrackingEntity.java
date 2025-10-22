@@ -13,47 +13,49 @@ public class EmailTrackingEntity {
 
     // The unique ID embedded in the tracking pixel. This is the primary key.
     @Id
-    @Column(length = 255)
+    @Column(name = "tracking_id", length = 255)
     private String trackingId;
 
-    @Column(nullable = false, length = 255)
+    @Column(name = "recipient_email", length = 255)
     private String recipientEmail;
 
-    @Column(nullable = false, length = 36)
-    private String batchId; // The ID of the overall send operation
+    @Column(name = "batch_id", length = 255)
+    private String batchId;
 
-    @Column(nullable = false)
+    @Column(name = "sent_timestamp")
     private LocalDateTime sentTimestamp;
 
-    // Tracking metrics
-    @Column(nullable = false)
+    @Column(name = "open_count")
     private int openCount = 0;
 
+    @Column(name = "first_open_timestamp")
     private LocalDateTime firstOpenTimestamp;
 
+    @Column(name = "last_open_timestamp")
     private LocalDateTime lastOpenTimestamp;
 
-    @Column(length = 50)
-    private String clientIpAddress;
-
-    // We will store the raw User-Agent string
-    @Column(length = 512)
+    // --- CRITICAL FIXES FOR TRUNCATION ---
+    // User-Agent string can be > 255 chars, 512 is safe, or TEXT is safer.
+    // Use length=512 to match your successful manual DDL.
+    @Column(name = "client_user_agent", length = 512)
     private String clientUserAgent;
 
-    // Fields for derived data (e.g., from a User-Agent parser or GeoIP service)
-    @Column(length = 50)
+    @Column(name = "client_browser", length = 512)
     private String clientBrowser;
 
-    @Column(length = 50)
+    @Column(name = "client_device", length = 512)
     private String clientDevice;
 
-    // Fields for Geolocation (requires external GeoIP library to populate)
-    @Column(length = 50)
+    // IP address needs 45 for IPv6
+    @Column(name = "client_ip_address", length = 45)
+    private String clientIpAddress;
+
+    // Geo-location fields
+    @Column(name = "client_city", length = 100)
     private String clientCity;
 
-    @Column(length = 50)
+    @Column(name = "client_country", length = 100)
     private String clientCountry;
-
     // --- Constructors ---
 
     public EmailTrackingEntity() {}
