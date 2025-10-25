@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -46,6 +47,15 @@ public class EmailTrackingService {
         } catch (Exception e) {
             log.error("Failed to save initial tracking record for ID {}: {}", trackingId, e.getMessage(), e);
         }
+    }
+
+    /**
+     * NEW: Retrieves all email tracking records from the database.
+     * @return A list of all EmailTrackingEntity objects.
+     */
+    public List<EmailTrackingEntity> getAllTrackingStatus() {
+        // JpaRepository's findAll() method retrieves all records.
+        return trackingRepository.findAll();
     }
 
     /**

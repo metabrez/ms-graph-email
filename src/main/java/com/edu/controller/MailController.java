@@ -14,11 +14,13 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/mail")
+@CrossOrigin("http://localhost:4200")
 public class MailController {
 
     private static final Logger log = LoggerFactory.getLogger(MailController.class);
@@ -151,6 +153,29 @@ public class MailController {
             log.warn("Tracking status not found for ID {}", trackingId);
             // Returns 404 Not Found
             return new ResponseEntity<>(HttpStatus.NOT_FOUND);
+        }
+    }
+
+    // --- NEW ENDPOINT TO RETRIEVE ALL TRACKING DATA ---
+    /**
+     * NEW: Endpoint to retrieve all email open tracking records.
+     *
+     * @return A list of all EmailTrackingEntity objects (200 OK).
+     */
+    @GetMapping("/track/all")
+    public ResponseEntity<List<EmailTrackingEntity>> getAllTrackingStatus() {
+        log.info("Received request to get ALL open tracking records.");
+
+        // Use the injected EmailTrackingService to query all records from the database
+        List<EmailTrackingEntity> allTrackingRecords = trackingService.getAllTrackingStatus();
+
+        if (allTrackingRecords.isEmpty()) {
+            // Return 200 OK with an empty list if no records are found, or 204 No Content
+            // Returning 200 with an empty list is often preferred in API design.
+            return new ResponseEntity<>(allTrackingRecords, HttpStatus.OK);
+        } else {
+            // Returns: List of EmailTrackingEntity objects (200 OK)
+            return new ResponseEntity<>(allTrackingRecords, HttpStatus.OK);
         }
     }
     @GetMapping
